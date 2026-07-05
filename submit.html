@@ -104,6 +104,13 @@
     transition:transform .12s,filter .18s,box-shadow .18s;
     position:relative;overflow:hidden;
   }
+  .btn-spinner{
+    display:inline-block;width:14px;height:14px;margin-right:8px;vertical-align:-2px;
+    border:2px solid currentColor;border-right-color:transparent;border-radius:50%;
+    animation:btn-spin .6s linear infinite;opacity:.85;
+  }
+  @keyframes btn-spin{ to{ transform:rotate(360deg); } }
+  @media (prefers-reduced-motion:reduce){ .btn-spinner{animation:none;border-style:dotted;} }
   .btn::after{
     content:"";position:absolute;inset:0 0 55% 0;border-radius:inherit;
     background:linear-gradient(180deg, rgba(255,255,255,.35), rgba(255,255,255,0));
@@ -293,6 +300,21 @@
    ================================================================ */
 const API_URL = "https://script.google.com/macros/s/AKfycbxS6Km20JJmuDvc56nmzIIBEtVnhx7OIUOj7q5xch_uveT4zgdOQRTe5-WMmg7jBg/exec";
 
+/* ---------------- button loading state ----------------
+   Every async button gets a spinner + label, not just disabled text. */
+function setBtnLoading(btn, label){
+  if (!btn) return;
+  if (btn.dataset.originalHtml === undefined) btn.dataset.originalHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="btn-spinner" aria-hidden="true"></span>' + label;
+}
+function clearBtnLoading(btn, label){
+  if (!btn) return;
+  btn.disabled = false;
+  btn.innerHTML = (label !== undefined) ? label : (btn.dataset.originalHtml || btn.textContent);
+  delete btn.dataset.originalHtml;
+}
+
 /* All three pages share one real origin now (no more sandboxed Sites
    embeds), so this reliably carries the student number over from the
    Home page. Kept in a try/catch anyway since some browsers still block
@@ -407,7 +429,7 @@ async function submitHours(){
   payload.photoBase64 = photoData.base64;
   payload.photoType = photoData.type;
 
-  btn.disabled = true; btn.textContent = "Uploading…";
+  setBtnLoading(btn, "Uploading…");
   try {
     let data;
     try {
@@ -424,7 +446,7 @@ async function submitHours(){
   } catch(e){
     showSubmitMsg("err", e.message);
   } finally {
-    btn.disabled = false; btn.textContent = "Submit for review";
+    clearBtnLoading(btn, "Submit for review");
   }
 }
 
