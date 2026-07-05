@@ -93,6 +93,13 @@
     padding:11px 20px;border-radius:14px;border:none;cursor:pointer;
     transition:transform .12s,filter .18s;position:relative;overflow:hidden;
   }
+  .btn-spinner{
+    display:inline-block;width:14px;height:14px;margin-right:8px;vertical-align:-2px;
+    border:2px solid currentColor;border-right-color:transparent;border-radius:50%;
+    animation:btn-spin .6s linear infinite;opacity:.85;
+  }
+  @keyframes btn-spin{ to{ transform:rotate(360deg); } }
+  @media (prefers-reduced-motion:reduce){ .btn-spinner{animation:none;border-style:dotted;} }
   .btn::after{content:"";position:absolute;inset:0 0 55% 0;border-radius:inherit;background:linear-gradient(180deg,rgba(255,255,255,.35),rgba(255,255,255,0));pointer-events:none;}
   .btn:active{transform:scale(.97);}
   .btn:disabled{opacity:.55;cursor:wait;}
@@ -400,8 +407,8 @@
     <div class="tab-panel active" id="tab-queue">
       <div class="bulk-bar" id="bulkBar">
         <span><span class="n" id="bulkCount">0</span> selected</span>
-        <button class="btn btn-approve btn-sm" onclick="bulkReview('Approved')">Approve selected</button>
-        <button class="btn btn-deny btn-sm" onclick="bulkReview('Denied')">Deny selected</button>
+        <button class="btn btn-approve btn-sm" onclick="bulkReview(this, 'Approved')">Approve selected</button>
+        <button class="btn btn-deny btn-sm" onclick="bulkReview(this, 'Denied')">Deny selected</button>
         <span class="spacer"></span>
         <button class="bulk-clear" onclick="clearSelection()">Clear</button>
       </div>
@@ -562,6 +569,24 @@ const API_URL = "https://script.google.com/macros/s/AKfycbxS6Km20JJmuDvc56nmzIIB
 
 const GATE_PROMPT = "Enter the officer PIN to manage hours and opportunities.";
 
+/* ---------------- button loading state ----------------
+   Every async button gets a spinner + label, not just disabled text — this
+   covers both the static id-based buttons (login, save, etc.) and the
+   dynamically-rendered per-row buttons (review, delete, toggle, etc.),
+   which previously gave zero feedback while a request was in flight. */
+function setBtnLoading(btn, label){
+  if (!btn) return;
+  if (btn.dataset.originalHtml === undefined) btn.dataset.originalHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="btn-spinner" aria-hidden="true"></span>' + label;
+}
+function clearBtnLoading(btn, label){
+  if (!btn) return;
+  btn.disabled = false;
+  btn.innerHTML = (label !== undefined) ? label : (btn.dataset.originalHtml || btn.textContent);
+  delete btn.dataset.originalHtml;
+}
+
 /* ---------------- API transport: fetch first, JSONP fallback ----------------
    iOS Safari can refuse cross-site <script> loads inside embedded iframes,
    which kills JSONP instantly. Plain fetch GET works because Apps Script
@@ -614,7 +639,7 @@ async function unlock(){
   err.style.display = "none";
   if (!pin){ err.textContent = "Enter the PIN."; err.style.display = "block"; return; }
 
-  btn.disabled = true; btn.textContent = "Checking…";
+  setBtnLoading(btn, "Checking…");
   try {
     const data = await apiCall({ action:"officerData", pin });
     if (!data.success){ err.textContent = data.error || "Wrong PIN."; err.style.display = "block"; return; }
@@ -625,7 +650,7 @@ async function unlock(){
   } catch(e){
     err.textContent = e.message; err.style.display = "block";
   } finally {
-    btn.disabled = false; btn.textContent = "Unlock";
+    clearBtnLoading(btn, "Unlock");
   }
 }
 
@@ -724,8 +749,8 @@ function renderQueue(){
             ? '<a class="photo-link" href="' + esc(e.photo) + '" target="_blank" rel="noopener">📷 View photo</a>'
             : '<span class="photo-link none">No photo</span>') +
           '<input class="q-note" id="note-' + e.row + '" maxlength="200" placeholder="Optional note (shown in sheet)">' +
-          '<button class="btn btn-approve btn-sm" onclick="review(' + e.row + ', ' + jsAttr(e.ts) + ', \'Approved\')">Approve</button>' +
-          '<button class="btn btn-deny btn-sm" onclick="review(' + e.row + ', ' + jsAttr(e.ts) + ', \'Denied\')">Deny</button>' +
+          '<button class="btn btn-approve btn-sm" onclick="review(this, ' + e.row + ', ' + jsAttr(e.ts) + ', \'Approved\')">Approve</button>' +
+          '<button class="btn btn-deny btn-sm" onclick="review(this, ' + e.row + ', ' + jsAttr(e.ts) + ', \'Denied\')">Deny</button>' +
         '</div>' +
       '</div>';
     list.appendChild(card);
@@ -744,9 +769,9 @@ function renderAll(){
     .forEach(e => {
       const tr = document.createElement("tr");
       const flip = e.status === "Approved"
-        ? '<button class="row-flip" onclick="flipDecision(' + e.row + ', ' + jsAttr(e.ts) + ', \'Denied\')">Flip to denied</button>'
+        ? '<button class="row-flip" onclick="flipDecision(this, ' + e.row + ', ' + jsAttr(e.ts) + ', \'Denied\')">Flip to denied</button>'
         : e.status === "Denied"
-          ? '<button class="row-flip" onclick="flipDecision(' + e.row + ', ' + jsAttr(e.ts) + ', \'Approved\')">Flip to approved</button>'
+          ? '<button class="row-flip" onclick="flipDecision(this, ' + e.row + ', ' + jsAttr(e.ts) + ', \'Approved\')">Flip to approved</button>'
           : '';
       tr.innerHTML =
         '<td><b>' + esc(e.name) + '</b><br><span class="mono" style="font-size:.72rem;color:var(--ink-faint)">#' + esc(e.studentNumber) + '</span></td>' +
@@ -808,46 +833,47 @@ function renderOpps(){
         (meta ? '<div class="meta">' + esc(meta) + '</div>' : '') +
       '</div>' +
       '<div class="controls">' +
-        '<button class="toggle-btn ' + (o.active ? 'on' : 'off') + '" onclick="toggleOpp(' + o.row + ', ' + jsAttr(o.title) + ', ' + (o.active ? "'N'" : "'Y'") + ')">' + (o.active ? 'Hide' : 'Show') + '</button>' +
-        '<button class="del-btn" onclick="deleteOpp(' + o.row + ', ' + jsAttr(o.title) + ')">Delete</button>' +
+        '<button class="toggle-btn ' + (o.active ? 'on' : 'off') + '" onclick="toggleOpp(this, ' + o.row + ', ' + jsAttr(o.title) + ', ' + (o.active ? "'N'" : "'Y'") + ')">' + (o.active ? 'Hide' : 'Show') + '</button>' +
+        '<button class="del-btn" onclick="deleteOpp(this, ' + o.row + ', ' + jsAttr(o.title) + ')">Delete</button>' +
       '</div>';
     list.appendChild(row);
   });
 }
 
 /* ---------------- review actions ---------------- */
-async function review(row, ts, decision, noteOverride){
+async function review(btn, row, ts, decision, noteOverride){
   const noteEl = document.getElementById("note-" + row);
   const note = (noteOverride !== undefined) ? noteOverride : (noteEl ? noteEl.value.trim() : "");
   const card = document.getElementById("q-" + row);
-  if (card) card.classList.add("leaving");
+  setBtnLoading(btn, decision === "Approved" ? "Approving…" : "Denying…");
   try {
     const res = await apiCall({ action:"reviewHours", pin: PIN, row, ts, decision, note });
     if (!res.success){
-      if (card) card.classList.remove("leaving");
+      clearBtnLoading(btn);
       showToast(res.error, true);
       if (/changed since|no longer exists/i.test(res.error || "")) loadData();
       return;
     }
+    if (card) card.classList.add("leaving");
     applyDecisionLocally(row, decision, note);
     showToast(decision === "Approved" ? "Hours approved ✓" : "Hours denied");
   } catch(e){
-    if (card) card.classList.remove("leaving");
+    clearBtnLoading(btn);
     showToast(e.message, true);
   }
 }
 
 /* Flip from the All Submissions tab — keep the entry's existing note instead
    of silently wiping it (there's no note input on that tab). */
-function flipDecision(row, ts, decision){
+function flipDecision(btn, row, ts, decision){
   const entry = [...(DATA.pending || []), ...(DATA.decided || [])].find(e => e.row === row);
-  review(row, ts, decision, entry ? (entry.note || "") : "");
+  review(btn, row, ts, decision, entry ? (entry.note || "") : "");
 }
 
-async function bulkReview(decision){
+async function bulkReview(btn, decision){
   const rows = [...selected];
   if (!rows.length) return;
-  showToast("Processing " + rows.length + "…");
+  setBtnLoading(btn, "Processing…");
   let ok = 0, fail = 0;
   for (const row of rows){
     const entry = (DATA.pending || []).find(e => e.row === row);
@@ -858,6 +884,7 @@ async function bulkReview(decision){
       else fail++;
     } catch(e){ fail++; }
   }
+  clearBtnLoading(btn);
   clearSelection();
   showToast(ok + " " + decision.toLowerCase() + (fail ? ", " + fail + " failed — refresh" : " ✓"), fail > 0);
   if (fail) loadData();
@@ -921,7 +948,7 @@ async function addOpportunity(){
     active: "Y"
   };
   if (!payload.title){ msg.className = "opp-msg err"; msg.textContent = "Title is required."; return; }
-  btn.disabled = true; btn.textContent = "Posting…";
+  setBtnLoading(btn, "Posting…");
   try {
     const res = await apiCall(payload);
     if (!res.success){ msg.className = "opp-msg err"; msg.textContent = res.error; return; }
@@ -931,30 +958,32 @@ async function addOpportunity(){
   } catch(e){
     msg.className = "opp-msg err"; msg.textContent = e.message;
   } finally {
-    btn.disabled = false; btn.textContent = "Post opportunity";
+    clearBtnLoading(btn, "Post opportunity");
   }
 }
 
-async function toggleOpp(row, title, newState){
+async function toggleOpp(btn, row, title, newState){
+  setBtnLoading(btn, newState === "Y" ? "Showing…" : "Hiding…");
   try {
     const res = await apiCall({ action:"toggleOpportunity", pin: PIN, row, title, active: newState });
-    if (!res.success){ showToast(res.error, true); if (/changed since/i.test(res.error||"")) loadData(); return; }
+    if (!res.success){ clearBtnLoading(btn); showToast(res.error, true); if (/changed since/i.test(res.error||"")) loadData(); return; }
     const o = (DATA.opportunities || []).find(x => x.row === row);
     if (o) o.active = newState === "Y";
     renderOpps();
     showToast(newState === "Y" ? "Opportunity is live." : "Opportunity hidden.");
-  } catch(e){ showToast(e.message, true); }
+  } catch(e){ clearBtnLoading(btn); showToast(e.message, true); }
 }
 
-async function deleteOpp(row, title){
+async function deleteOpp(btn, row, title){
   const ok = await showConfirm('Delete "' + title + '" permanently? Hiding it is usually safer.');
   if (!ok) return;
+  setBtnLoading(btn, "Deleting…");
   try {
     const res = await apiCall({ action:"deleteOpportunity", pin: PIN, row, title });
-    if (!res.success){ showToast(res.error, true); if (/changed since/i.test(res.error||"")) loadData(); return; }
+    if (!res.success){ clearBtnLoading(btn); showToast(res.error, true); if (/changed since/i.test(res.error||"")) loadData(); return; }
     showToast("Deleted.");
     loadData();   // rows shift after a delete — always refetch
-  } catch(e){ showToast(e.message, true); }
+  } catch(e){ clearBtnLoading(btn); showToast(e.message, true); }
 }
 
 /* ---------------- settings ---------------- */
@@ -991,7 +1020,7 @@ async function saveSettings(){
   msg.className = "opp-msg";
   const goalVal = Number(val("setAnnualGoal"));
   if (!goalVal || goalVal <= 0){ msg.className = "opp-msg err"; msg.textContent = "Enter a goal greater than 0."; return; }
-  btn.disabled = true; btn.textContent = "Saving…";
+  setBtnLoading(btn, "Saving…");
   try {
     const res = await apiCall({ action:"updateSettings", pin: PIN, annualGoal: goalVal });
     if (!res.success){ msg.className = "opp-msg err"; msg.textContent = res.error || "Could not save."; return; }
@@ -1003,7 +1032,7 @@ async function saveSettings(){
   } catch(e){
     msg.className = "opp-msg err"; msg.textContent = e.message;
   } finally {
-    btn.disabled = false; btn.textContent = "Save goal";
+    clearBtnLoading(btn, "Save goal");
   }
 }
 
@@ -1041,9 +1070,9 @@ function renderMeetings(){
         (m.open ? '' :
           '<div class="manual-add">' +
             '<input type="text" id="madd-' + m.row + '" inputmode="numeric" maxlength="12" placeholder="Student #" onkeydown="if(event.key===\'Enter\')addAttendeeManually(' + m.row + ', ' + jsAttr(m.id) + ')">' +
-            '<button class="btn btn-navy btn-sm" onclick="addAttendeeManually(' + m.row + ', ' + jsAttr(m.id) + ')">Add attendee</button>' +
+            '<button class="btn btn-navy btn-sm" id="madd-btn-' + m.row + '" onclick="addAttendeeManually(' + m.row + ', ' + jsAttr(m.id) + ')">Add attendee</button>' +
             (absent.length && !m.makeupApplied
-              ? '<button class="btn btn-deny btn-sm" onclick="applyMakeup(' + m.row + ', ' + jsAttr(m.id) + ', ' + absent.length + ')">Apply 30-min makeup (' + absent.length + ')</button>'
+              ? '<button class="btn btn-deny btn-sm" onclick="applyMakeup(this, ' + m.row + ', ' + jsAttr(m.id) + ', ' + absent.length + ')">Apply 30-min makeup (' + absent.length + ')</button>'
               : m.makeupApplied ? '<span class="live-pill warn">Makeup applied ✓</span>' : '') +
             '<span class="hint">Check-in is closed, so this adds someone by hand — use it for stragglers before applying the makeup penalty.</span>' +
           '</div>'
@@ -1051,7 +1080,7 @@ function renderMeetings(){
       '</div>' +
       '<div class="controls">' +
         '<button class="btn btn-navy btn-sm" onclick="showQr(' + jsAttr(m.code) + ', ' + jsAttr(m.title) + ')">Show QR</button>' +
-        '<button class="toggle-btn ' + (m.open ? 'on' : 'off') + '" onclick="toggleMeeting(' + m.row + ', ' + jsAttr(m.id) + ', ' + (m.open ? "'N'" : "'Y'") + ')">' + (m.open ? 'Close check-in' : 'Reopen') + '</button>' +
+        '<button class="toggle-btn ' + (m.open ? 'on' : 'off') + '" onclick="toggleMeeting(this, ' + m.row + ', ' + jsAttr(m.id) + ', ' + (m.open ? "'N'" : "'Y'") + ')">' + (m.open ? 'Close check-in' : 'Reopen') + '</button>' +
       '</div>';
     list.appendChild(row);
   });
@@ -1060,6 +1089,7 @@ function renderMeetings(){
 /* Manually mark a student present — for stragglers after check-in has closed. */
 async function addAttendeeManually(row, id){
   const input = document.getElementById("madd-" + row);
+  const btn = document.getElementById("madd-btn-" + row);
   const num = input.value.trim();
   if (!/^\d{3,12}$/.test(num)){ showToast("Enter a valid student number.", true); return; }
   const member = (DATA.roster || []).find(r => String(r.studentNumber) === num);
@@ -1068,9 +1098,11 @@ async function addAttendeeManually(row, id){
   if (meeting && (meeting.attendees || []).some(a => String(a.studentNumber) === num)){
     showToast(member.name + " is already marked present.", true); return;
   }
+  setBtnLoading(btn, "Adding…");
+  input.disabled = true;
   try {
     const res = await apiCall({ action:"addAttendee", pin: PIN, row, id, studentNumber: num });
-    if (!res.success){ showToast(res.error || "Could not add attendee.", true); if (/changed since/i.test(res.error||"")) loadData(); return; }
+    if (!res.success){ clearBtnLoading(btn); input.disabled = false; showToast(res.error || "Could not add attendee.", true); if (/changed since/i.test(res.error||"")) loadData(); return; }
     if (meeting){
       meeting.attendees = meeting.attendees || [];
       meeting.attendees.push({ studentNumber: num, name: member.name });
@@ -1079,17 +1111,18 @@ async function addAttendeeManually(row, id){
     renderMeetings();
     renderAttendance();
     showToast(member.name + " added to attendance.");
-  } catch(e){ showToast(e.message, true); }
+  } catch(e){ clearBtnLoading(btn); input.disabled = false; showToast(e.message, true); }
 }
 
 /* Add a 30-minute makeup requirement to everyone absent from this meeting.
    One-shot per meeting — the button disappears once applied so it can't double-charge. */
-async function applyMakeup(row, id, absentCount){
+async function applyMakeup(btn, row, id, absentCount){
   const ok = await showConfirm("Add a 30-minute makeup requirement to the " + absentCount + " member(s) still marked absent? Add any stragglers first — this can't be undone from here.");
   if (!ok) return;
+  setBtnLoading(btn, "Applying…");
   try {
     const res = await apiCall({ action:"applyAbsenceMakeup", pin: PIN, row, id });
-    if (!res.success){ showToast(res.error || "Could not apply makeup.", true); if (/changed since/i.test(res.error||"")) loadData(); return; }
+    if (!res.success){ clearBtnLoading(btn); showToast(res.error || "Could not apply makeup.", true); if (/changed since/i.test(res.error||"")) loadData(); return; }
     const meeting = (DATA.meetings || []).find(m => m.row === row);
     if (meeting){
       meeting.makeupApplied = true;
@@ -1101,7 +1134,7 @@ async function applyMakeup(row, id, absentCount){
     renderMeetings();
     renderRoster();
     showToast("30-minute makeup applied to " + absentCount + " member(s).");
-  } catch(e){ showToast(e.message, true); }
+  } catch(e){ clearBtnLoading(btn); showToast(e.message, true); }
 }
 
 function toggleAtt(btn){
@@ -1116,7 +1149,7 @@ async function createMeeting(){
   msg.className = "opp-msg";
   const title = val("mTitle") || "Club Meeting";
   const date = val("mDate");
-  btn.disabled = true; btn.textContent = "Starting…";
+  setBtnLoading(btn, "Starting…");
   try {
     const res = await apiCall({ action:"createMeeting", pin: PIN, title, date });
     if (!res.success){ msg.className = "opp-msg err"; msg.textContent = res.error; return; }
@@ -1127,19 +1160,20 @@ async function createMeeting(){
   } catch(e){
     msg.className = "opp-msg err"; msg.textContent = e.message;
   } finally {
-    btn.disabled = false; btn.textContent = "Start meeting & get QR";
+    clearBtnLoading(btn, "Start meeting & get QR");
   }
 }
 
-async function toggleMeeting(row, id, newState){
+async function toggleMeeting(btn, row, id, newState){
+  setBtnLoading(btn, newState === "Y" ? "Reopening…" : "Closing…");
   try {
     const res = await apiCall({ action:"toggleMeeting", pin: PIN, row, id, open: newState });
-    if (!res.success){ showToast(res.error, true); if (/changed since/i.test(res.error||"")) loadData(); return; }
+    if (!res.success){ clearBtnLoading(btn); showToast(res.error, true); if (/changed since/i.test(res.error||"")) loadData(); return; }
     const m = (DATA.meetings || []).find(x => x.row === row);
     if (m) m.open = newState === "Y";
     renderMeetings();
     showToast(newState === "Y" ? "Check-in reopened." : "Check-in closed.");
-  } catch(e){ showToast(e.message, true); }
+  } catch(e){ clearBtnLoading(btn); showToast(e.message, true); }
 }
 
 function showQr(code, title){
