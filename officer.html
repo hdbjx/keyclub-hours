@@ -405,6 +405,7 @@
       <button class="tab-btn active" data-tab="queue" onclick="switchTab('queue')">Review Queue <span class="count" id="queueCount">0</span></button>
       <button class="tab-btn" data-tab="all" onclick="switchTab('all')">All Submissions</button>
       <button class="tab-btn" data-tab="roster" onclick="switchTab('roster')">Roster Progress</button>
+      <button class="tab-btn" data-tab="dues" onclick="switchTab('dues')">Dues</button>
       <button class="tab-btn" data-tab="meetings" onclick="switchTab('meetings')">Meetings</button>
       <button class="tab-btn" data-tab="attendance" onclick="switchTab('attendance')">Attendance</button>
       <button class="tab-btn" data-tab="opps" onclick="switchTab('opps')">Opportunities</button>
@@ -452,6 +453,25 @@
         <table>
           <thead><tr><th>Member</th><th>Number</th><th>Approved</th><th>Owed</th><th style="width:180px">Progress</th></tr></thead>
           <tbody id="rosterBody"></tbody>
+        </table>
+      </div></div>
+    </div>
+
+    <!-- ===== TAB: dues ===== -->
+    <div class="tab-panel" id="tab-dues">
+      <div class="stats-row" id="duesStatsRow" style="margin-bottom:18px;"></div>
+      <div class="filter-row">
+        <input type="text" id="duesSearch" placeholder="Search members…" oninput="renderDues()">
+        <select id="duesFilter" onchange="renderDues()">
+          <option value="">All members</option>
+          <option value="paid">Paid</option>
+          <option value="unpaid">Unpaid</option>
+        </select>
+      </div>
+      <div class="table-wrap"><div class="table-scroll">
+        <table>
+          <thead><tr><th>Member</th><th>Number</th><th>Status</th><th>Paid date</th><th>Note</th><th></th></tr></thead>
+          <tbody id="duesBody"></tbody>
         </table>
       </div></div>
     </div>
@@ -711,6 +731,7 @@ function renderEverything(){
   renderQueue();
   renderAll();
   renderRoster();
+  renderDues();
   renderOpps();
   renderMeetings();
   renderAttendance();
@@ -824,6 +845,92 @@ function renderRoster(){
     });
   if (!body.children.length){
     body.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--ink-faint);padding:30px">No members found.</td></tr>';
+  }
+}
+
+function renderDues(){
+  const body = document.getElementById("duesBody");
+  const q = document.getElementById("duesSearch").value.trim().toLowerCase();
+  const filter = document.getElementById("duesFilter").value;
+  body.innerHTML = "";
+  (DATA.roster || [])
+    .filter(m => !q || (m.name + " " + m.studentNumber).toLowerCase().includes(q))
+    .filter(m => !filter || (filter === "paid" ? m.duesPaid : !m.duesPaid))
+    .forEach(m => {
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        '<td><b>' + esc(m.name) + '</b></td>' +
+        '<td class="mono">#' + esc(m.studentNumber) + '</td>' +
+        '<td><span class="status-pill ' + (m.duesPaid ? 'approved' : 'pending') + '">' + (m.duesPaid ? 'Paid' : 'Unpaid') + '</span></td>' +
+        '<td class="mono">' + (m.duesDate ? esc(fmtDate(m.duesDate)) : '—') + '</td>' +
+        '<td><input class="q-note" style="min-width:140px" value="' + esc(m.duesNote || '') + '" placeholder="Note" onchange="saveDuesNote(this, ' + jsAttr(m.studentNumber) + ')"></td>' +
+        '<td>' + (m.duesPaid
+          ? '<button class="btn btn-deny btn-sm" onclick="setDuesPaid(this, ' + jsAttr(m.studentNumber) + ', false)">Mark unpaid</button>'
+          : '<button class="btn btn-approve btn-sm" onclick="setDuesPaid(this, ' + jsAttr(m.studentNumber) + ', true)">Mark paid</button>') + '</td>';
+      body.appendChild(tr);
+    });
+  if (!body.children.length){
+    body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--ink-faint);padding:30px">No members found.</td></tr>';
+  }
+  renderDuesStats();
+}
+
+function renderDuesStats(){
+  const el = document.getElementById("duesStatsRow");
+  if (!el) return;
+  const d = DATA.dues || {};
+  el.innerHTML =
+    '<div class="stat"><div class="v">$' + (d.amount ?? 0) + '</div><div class="l">Dues per member</div></div>' +
+    '<div class="stat"><div class="v">' + (d.paidCount ?? 0) + ' / ' + (d.totalMembers ?? 0) + '</div><div class="l">Paid</div></div>' +
+    '<div class="stat hot"><div class="v">$' + (d.collected ?? 0) + '</div><div class="l">Collected</div></div>' +
+    '<div class="stat"><div class="v">$' + (d.outstanding ?? 0) + '</div><div class="l">Outstanding</div></div>';
+}
+
+async function setDuesPaid(btn, studentNumber, paid){
+  setBtnLoading(btn, paid ? "Marking…" : "Marking…");
+  try {
+    const m = (DATA.roster || []).find(r => String(r.studentNumber) === String(studentNumber));
+    const res = await apiCall({
+      action: "toggleDues", pin: PIN, studentNumber,
+      paid: paid ? "Y" : "N",
+      note: m ? (m.duesNote || "") : ""
+    });
+    if (!res.success){ showToast(res.error || "Could not update dues.", true); return; }
+    if (m){
+      const wasPaid = m.duesPaid;
+      m.duesPaid = paid;
+      m.duesDate = paid ? new Date().toISOString().slice(0,10) : "";
+      if (DATA.dues && wasPaid !== paid){
+        DATA.dues.paidCount = (DATA.dues.paidCount || 0) + (paid ? 1 : -1);
+        DATA.dues.collected = Math.round(DATA.dues.paidCount * DATA.dues.amount * 100) / 100;
+        DATA.dues.outstanding = Math.round((DATA.dues.totalMembers - DATA.dues.paidCount) * DATA.dues.amount * 100) / 100;
+      }
+    }
+    renderDues();
+    showToast(paid ? "Marked paid." : "Marked unpaid.");
+  } catch(e){
+    showToast(e.message, true);
+  } finally {
+    clearBtnLoading(btn);
+  }
+}
+
+async function saveDuesNote(input, studentNumber){
+  const note = input.value.trim();
+  const m = (DATA.roster || []).find(r => String(r.studentNumber) === String(studentNumber));
+  const paid = m ? !!m.duesPaid : false;
+  try {
+    const res = await apiCall({
+      action: "toggleDues", pin: PIN, studentNumber,
+      paid: paid ? "Y" : "N",
+      date: m ? (m.duesDate || "") : "",
+      note
+    });
+    if (!res.success){ showToast(res.error || "Could not save note.", true); return; }
+    if (m) m.duesNote = note;
+    showToast("Note saved.");
+  } catch(e){
+    showToast(e.message, true);
   }
 }
 
