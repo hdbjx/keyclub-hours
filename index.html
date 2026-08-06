@@ -489,7 +489,10 @@
           <div class="name" id="memberName"></div>
           <div class="num" id="memberNumber"></div>
         </div>
-        <button class="signout" onclick="signOut()">Sign out</button>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <span class="status-pill" id="duesPill" style="display:none"></span>
+          <button class="signout" onclick="signOut()">Sign out</button>
+        </div>
       </div>
 
       <div class="punch-card">
@@ -560,7 +563,7 @@
    CONFIG — paste your Apps Script Web App URL between the quotes.
    Leave blank to preview the page with demo data.
    ================================================================ */
-const API_URL = "https://script.google.com/macros/s/AKfycbxfTNU6GIasMzWXqSC3kIxHVkzfSTHtIjTIf2yCyi4YzZfdvy-KexTvcAWrvcjJ9A/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbzKKrbRP8yTj999nCUtMIEJOfaUvG_rQeVYTgCZbjhBKQDXQDjeF-jvGCD4KrazPg/exec";
 
 const HOURS_GOAL_FALLBACK = 7;
 
@@ -621,7 +624,7 @@ function jsonpCall(qs){
 
 /* ---------------- demo data (used when API_URL is blank) ---------------- */
 const DEMO = {
-  student: { name:"Demo Member", studentNumber:"123456", goal:7, owed:0 },
+  student: { name:"Demo Member", studentNumber:"123456", goal:7, owed:0, duesPaid:false, duesDate:"", duesAmount:20 },
   annualGoal: 4000,
   annualApproved: 1180,
   entries: [
@@ -695,6 +698,21 @@ function renderProgress(data){
   document.getElementById("progressView").style.display = "block";
   document.getElementById("memberName").textContent = data.student.name;
   document.getElementById("memberNumber").textContent = "#" + data.student.studentNumber;
+
+  const duesPill = document.getElementById("duesPill");
+  if (data.student.duesAmount){
+    duesPill.style.display = "inline-block";
+    if (data.student.duesPaid){
+      duesPill.className = "status-pill approved";
+      duesPill.textContent = "Dues paid";
+    } else {
+      duesPill.className = "status-pill pending";
+      duesPill.textContent = "Dues due — $" + data.student.duesAmount;
+    }
+  } else {
+    duesPill.style.display = "none";
+  }
+
   document.getElementById("punchLabel").textContent = data.semesterLabel ? (data.semesterLabel + " service record") : "Semester service record";
 
   /* punch card of keys — slots past the base goal are makeup hours (red) */
