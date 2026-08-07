@@ -812,11 +812,10 @@ async function loadOpportunities(){
   try {
     const data = await apiCall({ action:"opportunities" });
     opps = data.success ? data.opportunities : [];
-    maybeShowRegCard(data.registrationOpen);
     renderAnnualGoal(data.annualGoal, data.annualApproved);
   } catch(e){
     opps = (e.message === "DEMO") ? DEMO.opportunities : null;
-    if (e.message === "DEMO"){ maybeShowRegCard(true); renderAnnualGoal(DEMO.annualGoal, DEMO.annualApproved); }
+    if (e.message === "DEMO"){ renderAnnualGoal(DEMO.annualGoal, DEMO.annualApproved); }
   }
   grid.innerHTML = "";
   CURRENT_OPPS = opps || [];
@@ -917,10 +916,25 @@ function icsStamp(d){
 }
 
 /* ---------------- new member registration ---------------- */
-function maybeShowRegCard(registrationOpen){
+// Shows Aug 1 – Oct 14 only (start-of-year signup window), and is a pure
+// client-side date check — no round trip to the sheet, so it appears
+// instantly instead of waiting on the "opportunities" fetch. The sheet's
+// "Registration Open" setting is still enforced server-side as a manual
+// override (see isRegistrationOpen_ in Code.gs) — an officer can force it
+// closed early and the actual submit will be blocked even if this window
+// hasn't ended yet.
+function isRegistrationWindow(){
+  const now = new Date();
+  const y = now.getFullYear();
+  const start = new Date(y, 7, 1);              // Aug 1
+  const end = new Date(y, 9, 14, 23, 59, 59);    // Oct 14, end of day
+  return now >= start && now <= end;
+}
+
+function maybeShowRegCard(){
   const card = document.getElementById("regCard");
   const done = storeGet("kc_registered") === "1";
-  card.classList.toggle("show", !!registrationOpen && !done);
+  card.classList.toggle("show", isRegistrationWindow() && !done);
 }
 
 async function registerStudent(){
@@ -1013,6 +1027,7 @@ function fmtDate(d){
 }
 
 /* ---------------- init ---------------- */
+maybeShowRegCard(); // pure date check — runs instantly, no network wait
 loadOpportunities();
 const savedNum = storeGet("kc_student_number");
 if (savedNum){
