@@ -656,7 +656,16 @@ async function apiCall(params){
     .map(([k,v]) => encodeURIComponent(k) + "=" + encodeURIComponent(v ?? ""))
     .join("&");
   try {
-    const res = await fetch(API_URL + "?" + qs, { method:"GET", redirect:"follow" });
+    // 9s cap on the fetch attempt so a slow/hung response fails over to
+    // JSONP instead of the dashboard just sitting there with no feedback.
+    const controller = new AbortController();
+    const cap = setTimeout(() => controller.abort(), 9000);
+    let res;
+    try {
+      res = await fetch(API_URL + "?" + qs, { method:"GET", redirect:"follow", signal: controller.signal });
+    } finally {
+      clearTimeout(cap);
+    }
     if (!res.ok) throw new Error("HTTP " + res.status);
     return await res.json();
   } catch(fetchErr){
@@ -688,6 +697,7 @@ function storeRemove(k){ try { sessionStorage.removeItem(k); } catch(e){} }
 let PIN = storeGet("kc_officer_pin") || "";
 let DATA = null;
 const selected = new Set();   // rows selected for bulk action
+const expandedAttMeetings = new Set(); // meeting rows with "View attendance" open, survives re-renders
 
 /* ---------------- gate ---------------- */
 async function unlock(){
@@ -1270,9 +1280,9 @@ function renderMeetings(){
         '<div class="meta">' + esc(fmtDate(m.date)) +
           ' · <b class="att-present">' + attendees.length + ' present</b>' +
           ' · <b class="att-absent">' + absent.length + ' absent</b>' +
-          ' · <button class="row-flip" onclick="toggleAtt(this)">View attendance</button>' +
+          ' · <button class="row-flip" onclick="toggleAtt(this, ' + m.row + ')">' + (expandedAttMeetings.has(m.row) ? 'Hide attendance' : 'View attendance') + '</button>' +
         '</div>' +
-        '<div class="att-list">' +
+        '<div class="att-list' + (expandedAttMeetings.has(m.row) ? ' show' : '') + '">' +
           '<div class="att-group"><span class="att-tag present">✓ Present (' + attendees.length + ')</span>' + presentNames + '</div>' +
           '<div class="att-group"><span class="att-tag absent">✕ Absent (' + absent.length + ')</span>' + absentNames + '</div>' +
         '</div>' +
@@ -1295,10 +1305,12 @@ function renderMeetings(){
   });
 }
 
-/* Manually mark a student present — for stragglers after check-in has closed. */
+/* Manually mark a student present — for stragglers after check-in has closed.
+   Optimistic: updates the UI and refocuses the input immediately so officers
+   can keep entering numbers back-to-back without waiting on a network round
+   trip per student. Rolled back with a toast if a save actually fails. */
 async function addAttendeeManually(row, id){
   const input = document.getElementById("madd-" + row);
-  const btn = document.getElementById("madd-btn-" + row);
   const num = input.value.trim();
   if (!/^\d{3,12}$/.test(num)){ showToast("Enter a valid student number.", true); return; }
   const member = (DATA.roster || []).find(r => String(r.studentNumber) === num);
@@ -1307,20 +1319,32 @@ async function addAttendeeManually(row, id){
   if (meeting && (meeting.attendees || []).some(a => String(a.studentNumber) === num)){
     showToast(member.name + " is already marked present.", true); return;
   }
-  setBtnLoading(btn, "Adding…");
-  input.disabled = true;
+
+  if (meeting){
+    meeting.attendees = meeting.attendees || [];
+    meeting.attendees.push({ studentNumber: num, name: member.name });
+  }
+  input.value = "";
+  renderMeetings();
+  renderAttendance();
+  // renderMeetings() rebuilds the row from scratch, so the old input node is
+  // gone — grab the fresh one and refocus it for the next entry.
+  const freshInput = document.getElementById("madd-" + row);
+  if (freshInput) freshInput.focus();
+
   try {
     const res = await apiCall({ action:"addAttendee", pin: PIN, row, id, studentNumber: num });
-    if (!res.success){ clearBtnLoading(btn); input.disabled = false; showToast(res.error || "Could not add attendee.", true); if (/changed since/i.test(res.error||"")) loadData(); return; }
-    if (meeting){
-      meeting.attendees = meeting.attendees || [];
-      meeting.attendees.push({ studentNumber: num, name: member.name });
+    if (!res.success){
+      if (meeting) meeting.attendees = meeting.attendees.filter(a => String(a.studentNumber) !== num);
+      renderMeetings(); renderAttendance();
+      showToast(res.error || (member.name + " couldn't be added — try again."), true);
+      if (/changed since/i.test(res.error||"")) loadData();
     }
-    input.value = "";
-    renderMeetings();
-    renderAttendance();
-    showToast(member.name + " added to attendance.");
-  } catch(e){ clearBtnLoading(btn); input.disabled = false; showToast(e.message, true); }
+  } catch(e){
+    if (meeting) meeting.attendees = meeting.attendees.filter(a => String(a.studentNumber) !== num);
+    renderMeetings(); renderAttendance();
+    showToast(member.name + " couldn't be added — " + e.message, true);
+  }
 }
 
 /* Add a 30-minute makeup requirement to everyone absent from this meeting.
@@ -1346,10 +1370,11 @@ async function applyMakeup(btn, row, id, absentCount){
   } catch(e){ clearBtnLoading(btn); showToast(e.message, true); }
 }
 
-function toggleAtt(btn){
+function toggleAtt(btn, row){
   const list = btn.closest(".info").querySelector(".att-list");
   const showing = list.classList.toggle("show");
   btn.textContent = showing ? "Hide attendance" : "View attendance";
+  if (showing) expandedAttMeetings.add(row); else expandedAttMeetings.delete(row);
 }
 
 async function createMeeting(){
