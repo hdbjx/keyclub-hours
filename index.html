@@ -454,6 +454,18 @@
         <label for="regEmail">School email</label>
         <input type="email" id="regEmail" maxlength="100" autocomplete="email" placeholder="you@school.org">
       </div>
+      <div class="field">
+        <label for="regShirt">T-shirt size</label>
+        <select id="regShirt">
+          <option value="">Select…</option>
+          <option value="XS">XS</option>
+          <option value="S">S</option>
+          <option value="M">M</option>
+          <option value="L">L</option>
+          <option value="XL">XL</option>
+          <option value="XXL">XXL</option>
+        </select>
+      </div>
       <div class="submit-actions">
         <button class="btn btn-navy" id="regBtn" onclick="registerStudent()">Register</button>
         <span class="form-msg" id="regMsg"></span>
@@ -563,7 +575,7 @@
    CONFIG — paste your Apps Script Web App URL between the quotes.
    Leave blank to preview the page with demo data.
    ================================================================ */
-const API_URL = "https://script.google.com/macros/s/AKfycbzKKrbRP8yTj999nCUtMIEJOfaUvG_rQeVYTgCZbjhBKQDXQDjeF-jvGCD4KrazPg/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbzMNOH-x8tYv0sO44-VDzFva27GS8kKMUMlnGMKod6abHXMIIh9tI0bjov9qvC7Gg/exec";
 
 const HOURS_GOAL_FALLBACK = 7;
 
@@ -948,13 +960,15 @@ async function registerStudent(){
     lastName: document.getElementById("regLast").value.trim(),
     studentNumber: document.getElementById("regNum").value.trim(),
     grade: document.getElementById("regGrade").value,
-    email: document.getElementById("regEmail").value.trim()
+    email: document.getElementById("regEmail").value.trim(),
+    shirtSize: document.getElementById("regShirt").value
   };
 
   if (!payload.firstName || !payload.lastName) return showRegMsg("err","Enter your first and last name.");
   if (!/^\d{3,12}$/.test(payload.studentNumber)) return showRegMsg("err","Student ID should be digits only.");
   if (!payload.grade) return showRegMsg("err","Pick your grade.");
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.email)) return showRegMsg("err","Enter your school email.");
+  if (!payload.shirtSize) return showRegMsg("err","Pick your t-shirt size.");
 
   setBtnLoading(btn, "Registering…");
   try {
