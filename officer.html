@@ -6,6 +6,8 @@
 <title>Key Club — Officer HQ</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="prefetch" href="index.html">
+<link rel="prefetch" href="submit.html">
 <link href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@500;600;700&family=Public+Sans:wght@400;500;600;700&family=Spline+Sans+Mono:wght@500;600&display=swap" rel="stylesheet">
 <style>
   :root{
@@ -699,6 +701,17 @@ let DATA = null;
 const selected = new Set();   // rows selected for bulk action
 const expandedAttMeetings = new Set(); // meeting rows with "View attendance" open, survives re-renders
 
+/* ---------------- officer data cache (instant reopen) ----------------
+   Session-scoped, same as the PIN — nothing here should outlive the tab on
+   a shared computer. Lets the dashboard render immediately when reopened
+   while a background refresh quietly brings it up to date. */
+const OFFICER_CACHE_KEY = "kc_officer_data_cache_v1";
+function cacheOfficerData(data){ try { storeSet(OFFICER_CACHE_KEY, JSON.stringify(data)); } catch(e){} }
+function readCachedOfficerData(){
+  try { const raw = storeGet(OFFICER_CACHE_KEY); return raw ? JSON.parse(raw) : null; }
+  catch(e){ return null; }
+}
+
 /* ---------------- gate ---------------- */
 async function unlock(){
   const btn = document.getElementById("unlockBtn");
@@ -714,6 +727,7 @@ async function unlock(){
     PIN = pin;
     storeSet("kc_officer_pin", pin);
     DATA = data;
+    cacheOfficerData(data);
     showDashboard();
   } catch(e){
     err.textContent = e.message; err.style.display = "block";
@@ -725,6 +739,7 @@ async function unlock(){
 function lock(){
   PIN = ""; DATA = null;
   storeRemove("kc_officer_pin");
+  storeRemove(OFFICER_CACHE_KEY);
   document.getElementById("dashboard").style.display = "none";
   document.getElementById("gate").style.display = "block";
   document.getElementById("gateSub").textContent = GATE_PROMPT;
@@ -742,6 +757,7 @@ async function loadData(showToastOnDone){
       return;
     }
     DATA = data;
+    cacheOfficerData(data);
     renderEverything();
     if (showToastOnDone) showToast("Data refreshed.");
   } catch(e){
@@ -1558,11 +1574,23 @@ function fmtDate(d){
 
 /* ---------------- init ---------------- */
 if (PIN){
-  document.getElementById("gateSub").textContent = "Re-checking your session…";
-  apiCall({ action:"officerData", pin: PIN }).then(data => {
-    if (data.success){ DATA = data; showDashboard(); }
-    else lock();
-  }).catch(() => lock());
+  const cached = readCachedOfficerData();
+  if (cached){
+    // instant: paint last-known data right away, no gate/spinner wait
+    DATA = cached;
+    showDashboard();
+    apiCall({ action:"officerData", pin: PIN }).then(data => {
+      if (data.success){ DATA = data; cacheOfficerData(data); renderEverything(); }
+      else if (/PIN/i.test(data.error || "")) lock();
+      // any other failure: keep showing the cached dashboard quietly
+    }).catch(() => { /* offline/slow — keep showing cached dashboard */ });
+  } else {
+    document.getElementById("gateSub").textContent = "Re-checking your session…";
+    apiCall({ action:"officerData", pin: PIN }).then(data => {
+      if (data.success){ DATA = data; cacheOfficerData(data); showDashboard(); }
+      else lock();
+    }).catch(() => lock());
+  }
 }
 </script>
 </body>

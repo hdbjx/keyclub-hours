@@ -6,6 +6,10 @@
 <title>Key Club — Service Hours</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- The other pages are tiny static files — prefetch them in the background
+     so clicking a nav link doesn't cost a network round trip for the HTML. -->
+<link rel="prefetch" href="submit.html">
+<link rel="prefetch" href="officer.html">
 <link href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@500;600;700&family=Public+Sans:wght@400;500;600;700&family=Spline+Sans+Mono:wght@500;600&display=swap" rel="stylesheet">
 <style>
   :root{
@@ -666,6 +670,16 @@ const DEMO = {
 /* ---------------- state ---------------- */
 let currentStudent = null;
 
+/* Warms the login lookup for a known student number as soon as the page
+   loads, so by the time they tap "View my hours" it's usually already
+   sitting there — the click just reads the finished promise instead of
+   starting a fresh round trip. One-shot: consumed (and cleared) on use. */
+let prefetchedLogin = null; // { num, promise }
+function prefetchLogin(num){
+  if (!num || !/^\d{3,12}$/.test(num) || !API_URL) return;
+  prefetchedLogin = { num, promise: apiCall({ action:"login", studentNumber:num }).catch(e => e) };
+}
+
 /* Safari blocks storage in cross-site iframes and THROWS on access —
    these wrappers keep the page alive when that happens. */
 function storeGet(k){ try { return localStorage.getItem(k); } catch(e){ return null; } }
@@ -687,7 +701,15 @@ async function login(){
   try {
     let data;
     try {
-      data = await apiCall({ action:"login", studentNumber:num });
+      if (prefetchedLogin && prefetchedLogin.num === num){
+        const result = await prefetchedLogin.promise;
+        prefetchedLogin = null;
+        if (result instanceof Error) throw result;
+        data = result;
+      } else {
+        prefetchedLogin = null;
+        data = await apiCall({ action:"login", studentNumber:num });
+      }
     } catch(e){
       if (e.message === "DEMO"){ data = { success:true, ...DEMO, student:{...DEMO.student, studentNumber:num} }; }
       else throw e;
@@ -1111,6 +1133,7 @@ loadOpportunities();
 const savedNum = storeGet("kc_student_number");
 if (savedNum){
   document.getElementById("studentNumberInput").value = savedNum;
+  prefetchLogin(savedNum); // warm it now so "View my hours" is instant
 }
 </script>
 </body>
