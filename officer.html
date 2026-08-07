@@ -938,32 +938,44 @@ function renderDuesStats(){
     '<div class="stat"><div class="v">$' + (d.outstanding ?? 0) + '</div><div class="l">Outstanding</div></div>';
 }
 
+/* Applies the paidCount/collected/outstanding delta for one dues flip.
+   Shared by the optimistic apply and its exact revert on failure. */
+function applyDuesDelta(paidBefore, paidAfter){
+  if (!DATA.dues || paidBefore === paidAfter) return;
+  DATA.dues.paidCount = (DATA.dues.paidCount || 0) + (paidAfter ? 1 : -1);
+  DATA.dues.collected = Math.round(DATA.dues.paidCount * DATA.dues.amount * 100) / 100;
+  DATA.dues.outstanding = Math.round((DATA.dues.totalMembers - DATA.dues.paidCount) * DATA.dues.amount * 100) / 100;
+}
+
 async function setDuesPaid(btn, studentNumber, paid){
-  setBtnLoading(btn, paid ? "Marking…" : "Marking…");
+  const m = (DATA.roster || []).find(r => String(r.studentNumber) === String(studentNumber));
+  if (!m){ showToast("Member not found.", true); return; }
+  const prevPaid = m.duesPaid;
+  const prevDate = m.duesDate;
+
+  applyDuesDelta(prevPaid, paid);
+  m.duesPaid = paid;
+  m.duesDate = paid ? new Date().toISOString().slice(0,10) : "";
+  renderDues();
+  showToast(paid ? "Marked paid." : "Marked unpaid.");
+
   try {
-    const m = (DATA.roster || []).find(r => String(r.studentNumber) === String(studentNumber));
     const res = await apiCall({
       action: "toggleDues", pin: PIN, studentNumber,
       paid: paid ? "Y" : "N",
-      note: m ? (m.duesNote || "") : ""
+      note: m.duesNote || ""
     });
-    if (!res.success){ showToast(res.error || "Could not update dues.", true); return; }
-    if (m){
-      const wasPaid = m.duesPaid;
-      m.duesPaid = paid;
-      m.duesDate = paid ? new Date().toISOString().slice(0,10) : "";
-      if (DATA.dues && wasPaid !== paid){
-        DATA.dues.paidCount = (DATA.dues.paidCount || 0) + (paid ? 1 : -1);
-        DATA.dues.collected = Math.round(DATA.dues.paidCount * DATA.dues.amount * 100) / 100;
-        DATA.dues.outstanding = Math.round((DATA.dues.totalMembers - DATA.dues.paidCount) * DATA.dues.amount * 100) / 100;
-      }
+    if (!res.success){
+      applyDuesDelta(paid, prevPaid);
+      m.duesPaid = prevPaid; m.duesDate = prevDate;
+      renderDues();
+      showToast(res.error || "Couldn't save — reverted.", true);
     }
-    renderDues();
-    showToast(paid ? "Marked paid." : "Marked unpaid.");
   } catch(e){
-    showToast(e.message, true);
-  } finally {
-    clearBtnLoading(btn);
+    applyDuesDelta(paid, prevPaid);
+    m.duesPaid = prevPaid; m.duesDate = prevDate;
+    renderDues();
+    showToast("Couldn't save — " + e.message + " Reverted.", true);
   }
 }
 
@@ -1079,22 +1091,26 @@ function renderOpps(){
 async function review(btn, row, ts, decision, noteOverride){
   const noteEl = document.getElementById("note-" + row);
   const note = (noteOverride !== undefined) ? noteOverride : (noteEl ? noteEl.value.trim() : "");
-  const card = document.getElementById("q-" + row);
-  setBtnLoading(btn, decision === "Approved" ? "Approving…" : "Denying…");
+  const exists = (DATA.pending || []).some(e => e.row === row) || (DATA.decided || []).some(e => e.row === row);
+  if (!exists){ showToast("Couldn't find that submission — try refreshing.", true); return; }
+
+  // Optimistic: apply the decision and re-render immediately so officers can
+  // blaze through the queue without a network wait per click. On failure we
+  // don't hand-unwind the hours math (it touches roster totals) — a guessed
+  // rollback risks getting a count wrong, so we pull a fresh authoritative
+  // copy instead.
+  applyDecisionLocally(row, decision, note);
+  showToast(decision === "Approved" ? "Hours approved ✓" : "Hours denied");
+
   try {
     const res = await apiCall({ action:"reviewHours", pin: PIN, row, ts, decision, note });
     if (!res.success){
-      clearBtnLoading(btn);
-      showToast(res.error, true);
-      if (/changed since|no longer exists/i.test(res.error || "")) loadData();
-      return;
+      showToast(res.error || "Couldn't save that — refreshing.", true);
+      loadData();
     }
-    if (card) card.classList.add("leaving");
-    applyDecisionLocally(row, decision, note);
-    showToast(decision === "Approved" ? "Hours approved ✓" : "Hours denied");
   } catch(e){
-    clearBtnLoading(btn);
-    showToast(e.message, true);
+    showToast("Couldn't save that — " + e.message + " Refreshing…", true);
+    loadData();
   }
 }
 
@@ -1109,19 +1125,38 @@ async function bulkReview(btn, decision){
   const rows = [...selected];
   if (!rows.length) return;
   setBtnLoading(btn, "Processing…");
+
+  // Apply every selected decision locally right away — the queue clears
+  // instantly — then save them in the background with a few requests in
+  // flight at once instead of strictly one-at-a-time (which is what made
+  // bulk actions feel slow), capped so we don't flood the Apps Script quota.
+  const jobs = rows
+    .map(row => {
+      const entry = (DATA.pending || []).find(e => e.row === row);
+      if (!entry) return null;
+      const ts = entry.ts;
+      applyDecisionLocally(row, decision, "");
+      return { row, ts };
+    })
+    .filter(Boolean);
+
   let ok = 0, fail = 0;
-  for (const row of rows){
-    const entry = (DATA.pending || []).find(e => e.row === row);
-    if (!entry){ fail++; continue; }
-    try {
-      const res = await apiCall({ action:"reviewHours", pin: PIN, row, ts: entry.ts, decision, note: "" });
-      if (res.success){ applyDecisionLocally(row, decision, ""); ok++; }
-      else fail++;
-    } catch(e){ fail++; }
+  let idx = 0;
+  async function worker(){
+    while (idx < jobs.length){
+      const job = jobs[idx++];
+      try {
+        const res = await apiCall({ action:"reviewHours", pin: PIN, row: job.row, ts: job.ts, decision, note: "" });
+        if (res.success) ok++; else fail++;
+      } catch(e){ fail++; }
+    }
   }
+  const CONCURRENCY = 4;
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, jobs.length) }, worker));
+
   clearBtnLoading(btn);
   clearSelection();
-  showToast(ok + " " + decision.toLowerCase() + (fail ? ", " + fail + " failed — refresh" : " ✓"), fail > 0);
+  showToast(ok + " " + decision.toLowerCase() + (fail ? ", " + fail + " failed — refreshing" : " ✓"), fail > 0);
   if (fail) loadData();
 }
 
@@ -1198,15 +1233,24 @@ async function addOpportunity(){
 }
 
 async function toggleOpp(btn, row, title, newState){
-  setBtnLoading(btn, newState === "Y" ? "Showing…" : "Hiding…");
+  const o = (DATA.opportunities || []).find(x => x.row === row);
+  const prevActive = o ? o.active : null;
+  if (o) o.active = newState === "Y";
+  renderOpps();
+  showToast(newState === "Y" ? "Opportunity is live." : "Opportunity hidden.");
   try {
     const res = await apiCall({ action:"toggleOpportunity", pin: PIN, row, title, active: newState });
-    if (!res.success){ clearBtnLoading(btn); showToast(res.error, true); if (/changed since/i.test(res.error||"")) loadData(); return; }
-    const o = (DATA.opportunities || []).find(x => x.row === row);
-    if (o) o.active = newState === "Y";
+    if (!res.success){
+      if (o) o.active = prevActive;
+      renderOpps();
+      showToast(res.error || "Couldn't save — reverted.", true);
+      if (/changed since/i.test(res.error||"")) loadData();
+    }
+  } catch(e){
+    if (o) o.active = prevActive;
     renderOpps();
-    showToast(newState === "Y" ? "Opportunity is live." : "Opportunity hidden.");
-  } catch(e){ clearBtnLoading(btn); showToast(e.message, true); }
+    showToast("Couldn't save — " + e.message + " Reverted.", true);
+  }
 }
 
 async function deleteOpp(btn, row, title){
@@ -1272,6 +1316,27 @@ async function saveSettings(){
 }
 
 /* ---------------- meetings ---------------- */
+const preloadedQrCodes = new Set(); // avoid re-requesting the same QR image
+
+function qrCheckinUrl(code){
+  const base = (DATA && DATA.checkinBase) || API_URL;
+  return base + "?page=checkin&code=" + encodeURIComponent(code);
+}
+function qrImageUrl(code){
+  return "https://api.qrserver.com/v1/create-qr-code/?size=600x600&margin=2&data=" + encodeURIComponent(qrCheckinUrl(code));
+}
+/* Warms the browser's image cache for every meeting's QR code in the
+   background as soon as meeting data is available, so clicking "Show QR"
+   opens with the image already loaded instead of waiting on the
+   third-party qrserver.com request right at click time. */
+function preloadMeetingQrCodes(){
+  (DATA.meetings || []).forEach(m => {
+    if (!m.code || preloadedQrCodes.has(m.code)) return;
+    preloadedQrCodes.add(m.code);
+    new Image().src = qrImageUrl(m.code);
+  });
+}
+
 function renderMeetings(){
   const list = document.getElementById("meetingList");
   list.innerHTML = "";
@@ -1280,6 +1345,7 @@ function renderMeetings(){
     list.innerHTML = '<div class="empty-state"><span class="big">No meetings yet</span>Start one to get a check-in QR code.</div>';
     return;
   }
+  preloadMeetingQrCodes();
   meetings.forEach(m => {
     const row = document.createElement("div");
     row.className = "opp-row" + (m.open ? "" : " inactive");
@@ -1415,23 +1481,31 @@ async function createMeeting(){
 }
 
 async function toggleMeeting(btn, row, id, newState){
-  setBtnLoading(btn, newState === "Y" ? "Reopening…" : "Closing…");
+  const m = (DATA.meetings || []).find(x => x.row === row);
+  const prevOpen = m ? m.open : null;
+  if (m) m.open = newState === "Y";
+  renderMeetings();
+  showToast(newState === "Y" ? "Check-in reopened." : "Check-in closed.");
   try {
     const res = await apiCall({ action:"toggleMeeting", pin: PIN, row, id, open: newState });
-    if (!res.success){ clearBtnLoading(btn); showToast(res.error, true); if (/changed since/i.test(res.error||"")) loadData(); return; }
-    const m = (DATA.meetings || []).find(x => x.row === row);
-    if (m) m.open = newState === "Y";
+    if (!res.success){
+      if (m) m.open = prevOpen;
+      renderMeetings();
+      showToast(res.error || "Couldn't save — reverted.", true);
+      if (/changed since/i.test(res.error||"")) loadData();
+    }
+  } catch(e){
+    if (m) m.open = prevOpen;
     renderMeetings();
-    showToast(newState === "Y" ? "Check-in reopened." : "Check-in closed.");
-  } catch(e){ clearBtnLoading(btn); showToast(e.message, true); }
+    showToast("Couldn't save — " + e.message + " Reverted.", true);
+  }
 }
 
 function showQr(code, title){
-  const base = (DATA && DATA.checkinBase) || API_URL;
-  const url = base + "?page=checkin&code=" + encodeURIComponent(code);
+  const url = qrCheckinUrl(code);
   document.getElementById("qrMeetingTitle").textContent = title;
   document.getElementById("qrCodeText").textContent = code;
-  document.getElementById("qrImg").src = "https://api.qrserver.com/v1/create-qr-code/?size=600x600&margin=2&data=" + encodeURIComponent(url);
+  document.getElementById("qrImg").src = qrImageUrl(code);
   const link = document.getElementById("qrLink");
   link.href = url; link.textContent = url;
   const overlay = document.getElementById("qrOverlay");
