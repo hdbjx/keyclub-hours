@@ -321,6 +321,8 @@
   .opp-desc{font-size:.88rem;color:var(--ink);}
   .opp-contact{margin-top:auto;padding-top:11px;border-top:1px solid rgba(16,32,64,.1);font-size:.8rem;color:var(--ink-soft);}
   .opp-contact strong{color:var(--navy);}
+  .opp-contact a, .opp-desc a{color:var(--navy);font-weight:600;text-decoration:underline;text-underline-offset:2px;}
+  .opp-contact a:hover, .opp-desc a:hover{color:var(--gold);}
   .cal-btn{
     margin-top:10px;align-self:flex-start;
     font-family:'Public Sans',sans-serif;font-weight:700;font-size:.78rem;
@@ -850,8 +852,8 @@ async function loadOpportunities(){
         (o.date ? '<span><span class="k">When</span>' + esc(o.date) + (o.time ? ' · ' + esc(o.time) : '') + '</span>' : '') +
         (o.location ? '<span><span class="k">Where</span>' + esc(o.location) + '</span>' : '') +
       '</div>' +
-      (o.description ? '<p class="opp-desc">' + esc(o.description) + '</p>' : '') +
-      (o.contact ? '<div class="opp-contact"><strong>To sign up:</strong> ' + esc(o.contact) + '</div>' : '') +
+      (o.description ? '<p class="opp-desc">' + linkify(o.description) + '</p>' : '') +
+      (o.contact ? '<div class="opp-contact"><strong>To sign up:</strong> ' + linkify(o.contact) + '</div>' : '') +
       (o.dateISO ? '<button type="button" class="cal-btn" onclick="downloadICS(' + idx + ')">+ Add to calendar</button>' : '');
     grid.appendChild(card);
   });
@@ -1026,6 +1028,30 @@ function renderAnnualGoal(goal, approved){
 
 /* ---------------- utils ---------------- */
 function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+/** Turns any URL, email, or phone number inside a plain-text string into a
+    clickable link, escaping everything else. Used for opportunity contact
+    info, which officers often type as "Email x@y.org" or a raw signup URL. */
+function linkify(text){
+  const s = String(text ?? "");
+  const re = /(https?:\/\/[^\s<]+|www\.[^\s<]+)|([\w.+-]+@[\w-]+\.[\w.-]+)|(\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4})/g;
+  let out = "", last = 0, m;
+  while ((m = re.exec(s)) !== null){
+    out += esc(s.slice(last, m.index));
+    const hit = m[0];
+    if (m[1]){ // url
+      const href = /^https?:\/\//i.test(hit) ? hit : "https://" + hit;
+      out += '<a href="' + esc(href) + '" target="_blank" rel="noopener">' + esc(hit) + '</a>';
+    } else if (m[2]){ // email
+      out += '<a href="mailto:' + esc(hit) + '">' + esc(hit) + '</a>';
+    } else { // phone
+      out += '<a href="tel:' + esc(hit.replace(/[^\d+]/g, "")) + '">' + esc(hit) + '</a>';
+    }
+    last = re.lastIndex;
+  }
+  out += esc(s.slice(last));
+  return out;
+}
 function fmtHrs(n){ return (Math.round(n * 4) / 4).toString(); }
 
 /* Date-only strings ("2026-01-24") parse as UTC midnight and can display a
