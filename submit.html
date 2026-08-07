@@ -393,11 +393,25 @@ function compressImage(file){
    is readable cross-origin. */
 async function apiPost(payload){
   if (!API_URL) throw new Error("DEMO");
-  const res = await fetch(API_URL, {
-    method: "POST",
-    headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify(payload)
-  });
+  // 30s cap — generous since photo uploads are the slowest thing on the
+  // site (base64 image + Sheets write), but a stalled connection should
+  // still fail with a clear message instead of leaving the spinner stuck.
+  const controller = new AbortController();
+  const cap = setTimeout(() => controller.abort(), 30000);
+  let res;
+  try {
+    res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+  } catch(e){
+    if (e.name === "AbortError") throw new Error("Upload timed out — check your connection and try again.");
+    throw new Error("Couldn't reach the server. Check your connection and try again.");
+  } finally {
+    clearTimeout(cap);
+  }
   if (!res.ok) throw new Error("Upload failed (" + res.status + "). Try again.");
   return res.json();
 }

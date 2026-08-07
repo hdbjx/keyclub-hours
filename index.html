@@ -610,11 +610,21 @@ async function apiCall(params){
     .map(([k,v]) => encodeURIComponent(k) + "=" + encodeURIComponent(v ?? ""))
     .join("&");
   try {
-    const res = await fetch(API_URL + "?" + qs, { method:"GET", redirect:"follow" });
+    // 9s cap on the fetch attempt — without this, a slow/hung Apps Script
+    // response just leaves the page sitting there with no fallback and no
+    // feedback. Aborting lets us drop to JSONP (or the timeout error) fast.
+    const controller = new AbortController();
+    const cap = setTimeout(() => controller.abort(), 9000);
+    let res;
+    try {
+      res = await fetch(API_URL + "?" + qs, { method:"GET", redirect:"follow", signal: controller.signal });
+    } finally {
+      clearTimeout(cap);
+    }
     if (!res.ok) throw new Error("HTTP " + res.status);
     return await res.json();
   } catch(fetchErr){
-    // fall back to JSONP for environments that block fetch
+    // fall back to JSONP for environments that block fetch (or timed out)
     return jsonpCall(qs);
   }
 }
@@ -820,23 +830,12 @@ function signOut(){
 }
 
 /* ---------------- opportunities ---------------- */
-async function loadOpportunities(){
+const OPPS_CACHE_KEY = "kc_opps_cache_v1";
+
+function renderOpportunities(opps){
   const grid = document.getElementById("oppsGrid");
-  let opps;
-  try {
-    const data = await apiCall({ action:"opportunities" });
-    opps = data.success ? data.opportunities : [];
-    renderAnnualGoal(data.annualGoal, data.annualApproved);
-  } catch(e){
-    opps = (e.message === "DEMO") ? DEMO.opportunities : null;
-    if (e.message === "DEMO"){ renderAnnualGoal(DEMO.annualGoal, DEMO.annualApproved); }
-  }
   grid.innerHTML = "";
   CURRENT_OPPS = opps || [];
-  if (opps === null){
-    grid.innerHTML = '<div class="opps-empty">Couldn\'t load opportunities right now. Refresh to try again.</div>';
-    return;
-  }
   if (!opps.length){
     grid.innerHTML = '<div class="opps-empty">No opportunities posted yet — check back soon, or ask an officer what\'s coming up.</div>';
     return;
@@ -857,6 +856,46 @@ async function loadOpportunities(){
       (o.dateISO ? '<button type="button" class="cal-btn" onclick="downloadICS(' + idx + ')">+ Add to calendar</button>' : '');
     grid.appendChild(card);
   });
+}
+
+/* Stale-while-revalidate: paint the last-known list from localStorage the
+   instant the page loads (no network wait), then quietly refresh it once
+   the real fetch comes back. First-ever visit still shows "Loading…" since
+   there's nothing cached yet. */
+async function loadOpportunities(){
+  const grid = document.getElementById("oppsGrid");
+  let cachedOpps = null;
+  try {
+    const raw = storeGet(OPPS_CACHE_KEY);
+    if (raw){
+      const parsed = JSON.parse(raw);
+      cachedOpps = parsed.opps || [];
+      renderOpportunities(cachedOpps);
+      if (parsed.annualGoal) renderAnnualGoal(parsed.annualGoal, parsed.annualApproved);
+    }
+  } catch(e){ cachedOpps = null; }
+
+  let opps, annualGoal, annualApproved;
+  try {
+    const data = await apiCall({ action:"opportunities" });
+    opps = data.success ? data.opportunities : null;
+    annualGoal = data.annualGoal; annualApproved = data.annualApproved;
+  } catch(e){
+    if (e.message === "DEMO"){
+      opps = DEMO.opportunities; annualGoal = DEMO.annualGoal; annualApproved = DEMO.annualApproved;
+    } else if (cachedOpps){
+      return; // offline/slow — keep showing the cached list instead of an error
+    } else {
+      opps = null;
+    }
+  }
+  if (opps === null){
+    if (!cachedOpps) grid.innerHTML = '<div class="opps-empty">Couldn\'t load opportunities right now. Refresh to try again.</div>';
+    return;
+  }
+  renderOpportunities(opps);
+  if (annualGoal) renderAnnualGoal(annualGoal, annualApproved);
+  try { storeSet(OPPS_CACHE_KEY, JSON.stringify({ opps, annualGoal, annualApproved })); } catch(e){}
 }
 
 /* ---------------- add to calendar ---------------- */
