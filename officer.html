@@ -406,6 +406,7 @@
       <button class="tab-btn" data-tab="all" onclick="switchTab('all')">All Submissions</button>
       <button class="tab-btn" data-tab="roster" onclick="switchTab('roster')">Roster Progress</button>
       <button class="tab-btn" data-tab="dues" onclick="switchTab('dues')">Dues</button>
+      <button class="tab-btn" data-tab="shirts" onclick="switchTab('shirts')">Shirts</button>
       <button class="tab-btn" data-tab="meetings" onclick="switchTab('meetings')">Meetings</button>
       <button class="tab-btn" data-tab="attendance" onclick="switchTab('attendance')">Attendance</button>
       <button class="tab-btn" data-tab="opps" onclick="switchTab('opps')">Opportunities</button>
@@ -472,6 +473,30 @@
         <table>
           <thead><tr><th>Member</th><th>Number</th><th>Status</th><th>Paid date</th><th>Note</th><th></th></tr></thead>
           <tbody id="duesBody"></tbody>
+        </table>
+      </div></div>
+    </div>
+
+    <!-- ===== TAB: shirts ===== -->
+    <div class="tab-panel" id="tab-shirts">
+      <div class="stats-row" id="shirtStatsRow" style="margin-bottom:18px;"></div>
+      <div class="filter-row">
+        <input type="text" id="shirtSearch" placeholder="Search members…" oninput="renderShirts()">
+        <select id="shirtFilter" onchange="renderShirts()">
+          <option value="">All members</option>
+          <option value="XS">XS</option>
+          <option value="S">S</option>
+          <option value="M">M</option>
+          <option value="L">L</option>
+          <option value="XL">XL</option>
+          <option value="XXL">XXL</option>
+          <option value="none">No size on file</option>
+        </select>
+      </div>
+      <div class="table-wrap"><div class="table-scroll">
+        <table>
+          <thead><tr><th>Member</th><th>Number</th><th>Size</th></tr></thead>
+          <tbody id="shirtBody"></tbody>
         </table>
       </div></div>
     </div>
@@ -598,7 +623,7 @@
 /* ================================================================
    CONFIG — same Web App URL as the member dashboard.
    ================================================================ */
-const API_URL = "https://script.google.com/macros/s/AKfycbzKKrbRP8yTj999nCUtMIEJOfaUvG_rQeVYTgCZbjhBKQDXQDjeF-jvGCD4KrazPg/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbzMNOH-x8tYv0sO44-VDzFva27GS8kKMUMlnGMKod6abHXMIIh9tI0bjov9qvC7Gg/exec";
 
 const GATE_PROMPT = "Enter the officer PIN to manage hours and opportunities.";
 
@@ -732,6 +757,7 @@ function renderEverything(){
   renderAll();
   renderRoster();
   renderDues();
+  renderShirts();
   renderOpps();
   renderMeetings();
   renderAttendance();
@@ -931,6 +957,69 @@ async function saveDuesNote(input, studentNumber){
     showToast("Note saved.");
   } catch(e){
     showToast(e.message, true);
+  }
+}
+
+const SHIRT_SIZES = ["XS", "S", "M", "L", "XL", "XXL"];
+
+function renderShirts(){
+  const body = document.getElementById("shirtBody");
+  const q = document.getElementById("shirtSearch").value.trim().toLowerCase();
+  const filter = document.getElementById("shirtFilter").value;
+  body.innerHTML = "";
+  (DATA.roster || [])
+    .filter(m => !q || (m.name + " " + m.studentNumber).toLowerCase().includes(q))
+    .filter(m => {
+      if (!filter) return true;
+      if (filter === "none") return !m.shirtSize;
+      return m.shirtSize === filter;
+    })
+    .forEach(m => {
+      const tr = document.createElement("tr");
+      const opts = ['<option value="">—</option>'].concat(
+        SHIRT_SIZES.map(s => '<option value="' + s + '"' + (m.shirtSize === s ? ' selected' : '') + '>' + s + '</option>')
+      ).join("");
+      tr.innerHTML =
+        '<td><b>' + esc(m.name) + '</b></td>' +
+        '<td class="mono">#' + esc(m.studentNumber) + '</td>' +
+        '<td><select onchange="saveShirtSize(this, ' + jsAttr(m.studentNumber) + ')">' + opts + '</select></td>';
+      body.appendChild(tr);
+    });
+  if (!body.children.length){
+    body.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--ink-faint);padding:30px">No members found.</td></tr>';
+  }
+  renderShirtStats();
+}
+
+function renderShirtStats(){
+  const el = document.getElementById("shirtStatsRow");
+  if (!el) return;
+  const counts = DATA.shirtCounts || {};
+  el.innerHTML = SHIRT_SIZES.map(s =>
+    '<div class="stat"><div class="v">' + (counts[s] || 0) + '</div><div class="l">' + s + '</div></div>'
+  ).join("");
+}
+
+async function saveShirtSize(select, studentNumber){
+  const size = select.value;
+  if (!size) return; // blank just means "don't change it yet"
+  select.disabled = true;
+  try {
+    const res = await apiCall({ action: "updateShirtSize", pin: PIN, studentNumber, size });
+    if (!res.success){ showToast(res.error || "Could not save size.", true); return; }
+    const m = (DATA.roster || []).find(r => String(r.studentNumber) === String(studentNumber));
+    const prev = m ? m.shirtSize : "";
+    if (m) m.shirtSize = size;
+    if (DATA.shirtCounts){
+      if (prev && DATA.shirtCounts.hasOwnProperty(prev)) DATA.shirtCounts[prev]--;
+      if (DATA.shirtCounts.hasOwnProperty(size)) DATA.shirtCounts[size] = (DATA.shirtCounts[size] || 0) + 1;
+    }
+    renderShirtStats();
+    showToast("Size saved.");
+  } catch(e){
+    showToast(e.message, true);
+  } finally {
+    select.disabled = false;
   }
 }
 
