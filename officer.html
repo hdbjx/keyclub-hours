@@ -6,6 +6,22 @@
 <title>Key Club — Officer HQ</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Applies the last-known theme colors instantly, before first paint. -->
+<script>
+(function(){
+  try {
+    var v = JSON.parse(localStorage.getItem("kc_theme_vars_v1") || "null");
+    if (!v) return;
+    var s = document.documentElement.style;
+    if (v.navy) s.setProperty("--navy", v.navy);
+    if (v.navy2){ s.setProperty("--navy-2", v.navy2); s.setProperty("--blue", v.navy2); }
+    if (v.gold) s.setProperty("--gold", v.gold);
+    if (v.goldBright) s.setProperty("--gold-bright", v.goldBright);
+    if (v.goldDeep) s.setProperty("--gold-deep", v.goldDeep);
+    if (v.goldSoft) s.setProperty("--gold-soft", v.goldSoft);
+  } catch(e){}
+})();
+</script>
 <link rel="prefetch" href="index.html">
 <link rel="prefetch" href="submit.html">
 <link href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@500;600;700&family=Public+Sans:wght@400;500;600;700&family=Spline+Sans+Mono:wght@500;600&display=swap" rel="stylesheet">
@@ -219,6 +235,10 @@
 
   /* ---------- opportunities ---------- */
   .opps-layout{display:grid;grid-template-columns:380px 1fr;gap:20px;align-items:start;}
+  .settings-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px;align-items:start;}
+  .theme-swatches{display:flex;gap:9px;flex-wrap:wrap;}
+  .theme-swatch{width:34px;height:34px;border-radius:50%;border:2px solid rgba(0,0,0,.15);cursor:pointer;padding:0;transition:transform .1s;}
+  .theme-swatch:hover{transform:scale(1.1);}
   .panel{border-radius:var(--radius);padding:22px;}
   .panel h3{font-family:'Zilla Slab',serif;color:var(--navy);font-size:1.1rem;margin-bottom:14px;}
   .f{display:flex;flex-direction:column;gap:5px;margin-bottom:12px;min-width:0;}
@@ -570,7 +590,23 @@
 
     <!-- ===== TAB: settings ===== -->
     <div class="tab-panel" id="tab-settings">
-      <div class="opps-layout">
+      <div class="settings-grid">
+
+        <div class="panel">
+          <h3>Semester</h3>
+          <div class="f"><label>Semester label</label><input id="setSemesterLabel" maxlength="60" placeholder="e.g. Fall 2026"></div>
+          <div class="f-row">
+            <div class="f"><label>Start date</label><input id="setSemesterStart" type="date"></div>
+            <div class="f"><label>End date</label><input id="setSemesterEnd" type="date"></div>
+          </div>
+          <div class="f"><label>Hours goal per member</label><input id="setHoursGoal" type="number" min="0.5" step="0.25" placeholder="e.g. 7"></div>
+          <button class="btn btn-navy" id="setSemesterSaveBtn" onclick="saveSemesterSettings()">Save semester settings</button>
+          <div class="opp-msg" id="setSemesterMsg"></div>
+          <p style="margin-top:10px;font-size:.78rem;color:var(--ink-faint);">
+            This used to mean editing the Config sheet by hand at semester rollover — now it's just this form.
+          </p>
+        </div>
+
         <div class="panel">
           <h3>Club-wide annual goal</h3>
           <div class="f">
@@ -583,10 +619,69 @@
           <p style="margin-top:10px;font-size:.78rem;color:var(--ink-faint);">
             This is every approved hour from every member, ever, added together, shown as one
             progress bar on the member homepage — not a per-member number. It's separate from
-            the per-semester goal used on each member's punch card.
+            the per-semester goal above.
           </p>
         </div>
-        <div></div>
+
+        <div class="panel">
+          <h3>Dues</h3>
+          <div class="f"><label>Amount per member ($ / year)</label><input id="setDuesAmount" type="number" min="0" step="1" placeholder="e.g. 20"></div>
+          <button class="btn btn-navy" id="setDuesSaveBtn" onclick="saveDuesAmount()">Save dues amount</button>
+          <div class="opp-msg" id="setDuesMsg"></div>
+        </div>
+
+        <div class="panel">
+          <h3>New member registration</h3>
+          <div class="f">
+            <label>Status</label>
+            <button class="toggle-btn" id="setRegToggle" onclick="toggleRegistrationOpen()">Loading…</button>
+          </div>
+          <div class="f-row">
+            <div class="f"><label>Window start (MM-DD)</label><input id="setRegStart" maxlength="5" placeholder="08-01"></div>
+            <div class="f"><label>Window end (MM-DD)</label><input id="setRegEnd" maxlength="5" placeholder="10-14"></div>
+          </div>
+          <button class="btn btn-navy" id="setRegWindowSaveBtn" onclick="saveRegistrationWindow()">Save window</button>
+          <div class="opp-msg" id="setRegMsg"></div>
+          <p style="margin-top:10px;font-size:.78rem;color:var(--ink-faint);">
+            Status is the hard on/off switch. The window is when the sign-up card automatically
+            shows on the homepage — no year needed, it repeats every year on its own.
+          </p>
+        </div>
+
+        <div class="panel">
+          <h3>Officer PIN</h3>
+          <div class="f-row">
+            <div class="f"><label>New PIN</label><input id="setNewPin" maxlength="20" placeholder="At least 4 characters"></div>
+            <div class="f"><label>Confirm PIN</label><input id="setConfirmPin" maxlength="20"></div>
+          </div>
+          <button class="btn btn-deny" id="setPinSaveBtn" onclick="changeOfficerPin()">Change PIN</button>
+          <div class="opp-msg" id="setPinMsg"></div>
+          <p style="margin-top:10px;font-size:.78rem;color:var(--ink-faint);">
+            Every officer needs the new PIN to log back in — make sure it gets to the rest of the team
+            before you change it.
+          </p>
+        </div>
+
+        <div class="panel">
+          <h3>Theme</h3>
+          <div class="f">
+            <label>Quick presets</label>
+            <div class="theme-swatches" id="themeSwatches"></div>
+          </div>
+          <div class="f-row">
+            <div class="f"><label>Primary color</label><input id="setThemePrimary" type="color" onchange="previewTheme()"></div>
+            <div class="f"><label>Accent color</label><input id="setThemeAccent" type="color" onchange="previewTheme()"></div>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;">
+            <button class="btn btn-navy" id="setThemeSaveBtn" onclick="saveTheme()">Save theme</button>
+            <button class="toggle-btn off" type="button" onclick="resetTheme()">Reset to default</button>
+          </div>
+          <div class="opp-msg" id="setThemeMsg"></div>
+          <p style="margin-top:10px;font-size:.78rem;color:var(--ink-faint);">
+            Preview updates live on this page as you pick — nothing changes for members until you save.
+          </p>
+        </div>
+
       </div>
     </div>
 
@@ -625,7 +720,7 @@
 /* ================================================================
    CONFIG — same Web App URL as the member dashboard.
    ================================================================ */
-const API_URL = "https://script.google.com/macros/s/AKfycbzMNOH-x8tYv0sO44-VDzFva27GS8kKMUMlnGMKod6abHXMIIh9tI0bjov9qvC7Gg/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbyATdHkIII-I8t3qzmvU7rsKF-uMfwrj0O0r-Oo4AOU_vxTLoKaePLkk7Y9wbnqUg/exec";
 
 const GATE_PROMPT = "Enter the officer PIN to manage hours and opportunities.";
 
@@ -698,6 +793,81 @@ function storeSet(k,v){ try { sessionStorage.setItem(k,v); } catch(e){} }
 function storeRemove(k){ try { sessionStorage.removeItem(k); } catch(e){} }
 let PIN = storeGet("kc_officer_pin") || "";
 let DATA = null;
+
+/* ---------------- theme ----------------
+   Officer-configurable brand colors, shared across all three pages via
+   localStorage (deliberately NOT sessionStorage, unlike the PIN/dashboard
+   cache above — the theme needs to persist and be readable by index.html
+   and submit.html too, in other tabs, not just this officer's session). */
+function localGet_(k){ try { return localStorage.getItem(k); } catch(e){ return null; } }
+function localSet_(k,v){ try { localStorage.setItem(k,v); } catch(e){} }
+
+const THEME_DEFAULT_PRIMARY = "#102040";
+const THEME_DEFAULT_ACCENT = "#e0c07a";
+const THEME_CACHE_KEY = "kc_theme_vars_v1";
+
+function hexToRgb_(hex){
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || "").trim());
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+function rgbToHex_(r, g, b){
+  const c = v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0");
+  return "#" + c(r) + c(g) + c(b);
+}
+function mix_(hex, towardHex, amount){
+  const a = hexToRgb_(hex), b = hexToRgb_(towardHex);
+  if (!a || !b) return hex;
+  return rgbToHex_(a.r + (b.r - a.r) * amount, a.g + (b.g - a.g) * amount, a.b + (b.b - a.b) * amount);
+}
+function computeThemeVars(primaryHex, accentHex){
+  const primary = hexToRgb_(primaryHex) ? primaryHex : THEME_DEFAULT_PRIMARY;
+  const accent = hexToRgb_(accentHex) ? accentHex : THEME_DEFAULT_ACCENT;
+  return {
+    navy: primary,
+    navy2: mix_(primary, "#ffffff", 0.22),
+    gold: accent,
+    goldBright: mix_(accent, "#ffffff", 0.18),
+    goldDeep: mix_(accent, "#000000", 0.35),
+    goldSoft: mix_(accent, "#ffffff", 0.88)
+  };
+}
+function applyThemeVars(v){
+  const s = document.documentElement.style;
+  s.setProperty("--navy", v.navy);
+  s.setProperty("--navy-2", v.navy2);
+  s.setProperty("--blue", v.navy2);
+  s.setProperty("--gold", v.gold);
+  s.setProperty("--gold-bright", v.goldBright);
+  s.setProperty("--gold-deep", v.goldDeep);
+  s.setProperty("--gold-soft", v.goldSoft);
+}
+/** WCAG-style relative luminance — used to warn before saving a color combo
+    that would make text unreadable (mirrors the same check in Code.gs). */
+function relLuminance_(hex){
+  const rgb = hexToRgb_(hex);
+  if (!rgb) return 0;
+  const chan = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+  return 0.2126 * chan(rgb.r) + 0.7152 * chan(rgb.g) + 0.0722 * chan(rgb.b);
+}
+/** Applies + caches the club's actual saved theme (not a preview) —
+    called whenever DATA is (re)loaded from the server. */
+function applyDashboardTheme(){
+  const s = DATA.settings || {};
+  const vars = computeThemeVars(s.themePrimary, s.themeAccent);
+  applyThemeVars(vars);
+  localSet_(THEME_CACHE_KEY, JSON.stringify(vars));
+}
+
+const THEME_PRESETS = [
+  { name: "Classic Navy & Gold", primary: "#102040", accent: "#e0c07a" },
+  { name: "Forest & Cream", primary: "#1b3a2b", accent: "#e8d9b5" },
+  { name: "Maroon & Sand", primary: "#3d1420", accent: "#e3c08a" },
+  { name: "Deep Teal & Coral", primary: "#0d3b3e", accent: "#f0a37a" },
+  { name: "Charcoal & Silver", primary: "#20242b", accent: "#c9d0da" },
+  { name: "Royal Purple & Gold", primary: "#2c1a4d", accent: "#e0c07a" }
+];
 const selected = new Set();   // rows selected for bulk action
 const expandedAttMeetings = new Set(); // meeting rows with "View attendance" open, survives re-renders
 
@@ -758,6 +928,7 @@ async function loadData(showToastOnDone){
     }
     DATA = data;
     cacheOfficerData(data);
+    applyDashboardTheme();
     renderEverything();
     if (showToastOnDone) showToast("Data refreshed.");
   } catch(e){
@@ -771,6 +942,7 @@ function showDashboard(){
   document.getElementById("lockBtn").style.display = "inline-block";
   const chip = document.getElementById("semesterChip");
   if (DATA.semesterLabel){ chip.textContent = DATA.semesterLabel; chip.style.display = "inline-block"; }
+  applyDashboardTheme();
   renderEverything();
 }
 
@@ -1266,10 +1438,21 @@ async function deleteOpp(btn, row, title){
 }
 
 /* ---------------- settings ---------------- */
+/* Prefills an input from server data without clobbering an in-progress
+   edit — renderEverything() re-runs this after any officer action anywhere
+   on the dashboard, so a field the officer is actively typing in shouldn't
+   get reset out from under them. */
+function setIfIdle(id, value){
+  const el = document.getElementById(id);
+  if (!el || document.activeElement === el) return;
+  if (value === undefined || value === null) return;
+  el.value = value;
+}
+
 function renderSettings(){
-  const el = document.getElementById("setAnnualGoal");
   const s = DATA.settings || {};
-  if (el && s.annualGoal) el.value = s.annualGoal;
+
+  setIfIdle("setAnnualGoal", s.annualGoal);
   const note = document.getElementById("setProgressNote");
   const goal = Number(s.annualGoal) || 0;
   const approved = Number(s.annualApproved) || 0;
@@ -1277,6 +1460,86 @@ function renderSettings(){
     note.textContent = goal
       ? "Currently at " + fmtHrs(approved) + " of " + fmtHrs(goal) + " combined hours (" + Math.round(Math.min(100, (approved / goal) * 100)) + "%) for the club this year."
       : "Set a goal below to start tracking combined progress.";
+  }
+
+  setIfIdle("setSemesterLabel", s.semesterLabel);
+  setIfIdle("setSemesterStart", s.semesterStart);
+  setIfIdle("setSemesterEnd", s.semesterEnd);
+  setIfIdle("setHoursGoal", s.hoursGoal);
+  setIfIdle("setDuesAmount", s.duesAmount);
+  setIfIdle("setRegStart", s.regWindowStart);
+  setIfIdle("setRegEnd", s.regWindowEnd);
+
+  const regBtn = document.getElementById("setRegToggle");
+  if (regBtn){
+    const open = !!s.registrationOpen;
+    regBtn.className = "toggle-btn " + (open ? "on" : "off");
+    regBtn.textContent = open ? "Open — accepting new members" : "Closed — hidden from students";
+  }
+
+  setIfIdle("setThemePrimary", s.themePrimary || THEME_DEFAULT_PRIMARY);
+  setIfIdle("setThemeAccent", s.themeAccent || THEME_DEFAULT_ACCENT);
+  renderThemeSwatches();
+}
+
+/* Built once — the swatch list itself never changes, no need to rebuild
+   on every renderEverything() pass. */
+function renderThemeSwatches(){
+  const wrap = document.getElementById("themeSwatches");
+  if (!wrap || wrap.dataset.built) return;
+  wrap.dataset.built = "1";
+  THEME_PRESETS.forEach(p => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "theme-swatch";
+    btn.title = p.name;
+    btn.style.background = "linear-gradient(135deg, " + p.primary + " 50%, " + p.accent + " 50%)";
+    btn.onclick = () => previewTheme(p.primary, p.accent);
+    wrap.appendChild(btn);
+  });
+}
+
+/* Live local preview only — applies immediately so the officer can see the
+   effect, but changes nothing on the server until Save is clicked. */
+function previewTheme(primaryOverride, accentOverride){
+  const primary = primaryOverride || val("setThemePrimary") || THEME_DEFAULT_PRIMARY;
+  const accent = accentOverride || val("setThemeAccent") || THEME_DEFAULT_ACCENT;
+  document.getElementById("setThemePrimary").value = primary;
+  document.getElementById("setThemeAccent").value = accent;
+  applyThemeVars(computeThemeVars(primary, accent));
+}
+
+function resetTheme(){
+  previewTheme(THEME_DEFAULT_PRIMARY, THEME_DEFAULT_ACCENT);
+}
+
+async function saveTheme(){
+  const btn = document.getElementById("setThemeSaveBtn");
+  const msg = document.getElementById("setThemeMsg");
+  msg.className = "opp-msg";
+  const primary = val("setThemePrimary");
+  const accent = val("setThemeAccent");
+  if (relLuminance_(primary) > 0.18){
+    msg.className = "opp-msg err"; msg.textContent = "That primary color is too light — white text on top won't be readable.";
+    return;
+  }
+  if (relLuminance_(accent) < 0.22){
+    msg.className = "opp-msg err"; msg.textContent = "That accent color is too dark — dark text on top won't be readable.";
+    return;
+  }
+  setBtnLoading(btn, "Saving…");
+  try {
+    const res = await apiCall({ action:"updateSettings", pin: PIN, themePrimary: primary, themeAccent: accent });
+    if (!res.success){ msg.className = "opp-msg err"; msg.textContent = res.error || "Could not save."; return; }
+    DATA.settings = DATA.settings || {};
+    DATA.settings.themePrimary = primary;
+    DATA.settings.themeAccent = accent;
+    applyDashboardTheme();
+    msg.className = "opp-msg ok"; msg.textContent = "Saved — members will see it next time they load the page.";
+  } catch(e){
+    msg.className = "opp-msg err"; msg.textContent = e.message;
+  } finally {
+    clearBtnLoading(btn, "Save theme");
   }
 }
 
@@ -1312,6 +1575,136 @@ async function saveSettings(){
     msg.className = "opp-msg err"; msg.textContent = e.message;
   } finally {
     clearBtnLoading(btn, "Save goal");
+  }
+}
+
+async function saveSemesterSettings(){
+  const btn = document.getElementById("setSemesterSaveBtn");
+  const msg = document.getElementById("setSemesterMsg");
+  msg.className = "opp-msg";
+  const label = val("setSemesterLabel");
+  const start = val("setSemesterStart");
+  const end = val("setSemesterEnd");
+  const hoursGoal = Number(val("setHoursGoal"));
+  if (!label){ msg.className = "opp-msg err"; msg.textContent = "Semester label can't be blank."; return; }
+  if (!hoursGoal || hoursGoal <= 0){ msg.className = "opp-msg err"; msg.textContent = "Hours goal must be greater than 0."; return; }
+  if (start && end && start > end){ msg.className = "opp-msg err"; msg.textContent = "Start date is after the end date."; return; }
+  setBtnLoading(btn, "Saving…");
+  try {
+    const res = await apiCall({ action:"updateSettings", pin: PIN, semesterLabel: label, semesterStart: start, semesterEnd: end, hoursGoal });
+    if (!res.success){ msg.className = "opp-msg err"; msg.textContent = res.error || "Could not save."; return; }
+    DATA.settings = DATA.settings || {};
+    Object.assign(DATA.settings, { semesterLabel: label, semesterStart: start, semesterEnd: end, hoursGoal });
+    DATA.semesterLabel = label;
+    DATA.goal = hoursGoal;
+    const chip = document.getElementById("semesterChip");
+    if (chip){ chip.textContent = label; chip.style.display = label ? "inline-block" : "none"; }
+    renderSettings();
+    renderRoster();
+    msg.className = "opp-msg ok"; msg.textContent = "Saved.";
+  } catch(e){
+    msg.className = "opp-msg err"; msg.textContent = e.message;
+  } finally {
+    clearBtnLoading(btn, "Save semester settings");
+  }
+}
+
+async function saveDuesAmount(){
+  const btn = document.getElementById("setDuesSaveBtn");
+  const msg = document.getElementById("setDuesMsg");
+  msg.className = "opp-msg";
+  const amount = Number(val("setDuesAmount"));
+  if (isNaN(amount) || amount < 0){ msg.className = "opp-msg err"; msg.textContent = "Enter a valid amount."; return; }
+  setBtnLoading(btn, "Saving…");
+  try {
+    const res = await apiCall({ action:"updateSettings", pin: PIN, duesAmount: amount });
+    if (!res.success){ msg.className = "opp-msg err"; msg.textContent = res.error || "Could not save."; return; }
+    DATA.settings = DATA.settings || {};
+    DATA.settings.duesAmount = amount;
+    if (DATA.dues){
+      DATA.dues.amount = amount;
+      DATA.dues.collected = Math.round(DATA.dues.paidCount * amount * 100) / 100;
+      DATA.dues.outstanding = Math.round((DATA.dues.totalMembers - DATA.dues.paidCount) * amount * 100) / 100;
+    }
+    renderDues();
+    msg.className = "opp-msg ok"; msg.textContent = "Saved.";
+  } catch(e){
+    msg.className = "opp-msg err"; msg.textContent = e.message;
+  } finally {
+    clearBtnLoading(btn, "Save dues amount");
+  }
+}
+
+/* Registration open/closed — the hard switch, kept separate from the window
+   dates below. Optimistic like the other toggles in the dashboard. */
+async function toggleRegistrationOpen(){
+  const s = DATA.settings || (DATA.settings = {});
+  const prev = !!s.registrationOpen;
+  s.registrationOpen = !prev;
+  renderSettings();
+  showToast(s.registrationOpen ? "Registration is open." : "Registration is closed.");
+  try {
+    const res = await apiCall({ action:"updateSettings", pin: PIN, registrationOpen: s.registrationOpen ? "Y" : "N" });
+    if (!res.success){
+      s.registrationOpen = prev;
+      renderSettings();
+      showToast(res.error || "Couldn't save — reverted.", true);
+    }
+  } catch(e){
+    s.registrationOpen = prev;
+    renderSettings();
+    showToast("Couldn't save — " + e.message + " Reverted.", true);
+  }
+}
+
+async function saveRegistrationWindow(){
+  const btn = document.getElementById("setRegWindowSaveBtn");
+  const msg = document.getElementById("setRegMsg");
+  msg.className = "opp-msg";
+  const start = val("setRegStart");
+  const end = val("setRegEnd");
+  if (!/^\d{2}-\d{2}$/.test(start) || !/^\d{2}-\d{2}$/.test(end)){
+    msg.className = "opp-msg err"; msg.textContent = "Use MM-DD, e.g. 08-01.";
+    return;
+  }
+  setBtnLoading(btn, "Saving…");
+  try {
+    const res = await apiCall({ action:"updateSettings", pin: PIN, regWindowStart: start, regWindowEnd: end });
+    if (!res.success){ msg.className = "opp-msg err"; msg.textContent = res.error || "Could not save."; return; }
+    DATA.settings = DATA.settings || {};
+    DATA.settings.regWindowStart = start;
+    DATA.settings.regWindowEnd = end;
+    msg.className = "opp-msg ok"; msg.textContent = "Saved — repeats automatically every year.";
+  } catch(e){
+    msg.className = "opp-msg err"; msg.textContent = e.message;
+  } finally {
+    clearBtnLoading(btn, "Save window");
+  }
+}
+
+async function changeOfficerPin(){
+  const btn = document.getElementById("setPinSaveBtn");
+  const msg = document.getElementById("setPinMsg");
+  msg.className = "opp-msg";
+  const newPin = val("setNewPin");
+  const confirmPin = val("setConfirmPin");
+  if (!newPin || newPin.length < 4){ msg.className = "opp-msg err"; msg.textContent = "PIN should be at least 4 characters."; return; }
+  if (newPin !== confirmPin){ msg.className = "opp-msg err"; msg.textContent = "PINs don't match."; return; }
+  const ok = await showConfirm('Change the officer PIN to "' + newPin + '"? Every officer will need the new PIN to log back in.');
+  if (!ok) return;
+  setBtnLoading(btn, "Saving…");
+  try {
+    const res = await apiCall({ action:"changePin", pin: PIN, newPin });
+    if (!res.success){ msg.className = "opp-msg err"; msg.textContent = res.error || "Could not change PIN."; return; }
+    PIN = newPin;
+    storeSet("kc_officer_pin", newPin);
+    document.getElementById("setNewPin").value = "";
+    document.getElementById("setConfirmPin").value = "";
+    msg.className = "opp-msg ok"; msg.textContent = "PIN changed — you're still logged in.";
+  } catch(e){
+    msg.className = "opp-msg err"; msg.textContent = e.message;
+  } finally {
+    clearBtnLoading(btn, "Change PIN");
   }
 }
 
