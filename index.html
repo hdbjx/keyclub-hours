@@ -6,6 +6,26 @@
 <title>Key Club — Service Hours</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Applies the last-known theme colors instantly, before first paint, so
+     returning visitors never see a flash of default colors. Officer HQ →
+     Settings → Theme is where these get changed; every page picks up the
+     new colors next time it loads opportunities data (see loadOpportunities
+     further down) and re-caches this for next time. -->
+<script>
+(function(){
+  try {
+    var v = JSON.parse(localStorage.getItem("kc_theme_vars_v1") || "null");
+    if (!v) return;
+    var s = document.documentElement.style;
+    if (v.navy) s.setProperty("--navy", v.navy);
+    if (v.navy2){ s.setProperty("--navy-2", v.navy2); s.setProperty("--blue", v.navy2); }
+    if (v.gold) s.setProperty("--gold", v.gold);
+    if (v.goldBright) s.setProperty("--gold-bright", v.goldBright);
+    if (v.goldDeep) s.setProperty("--gold-deep", v.goldDeep);
+    if (v.goldSoft) s.setProperty("--gold-soft", v.goldSoft);
+  } catch(e){}
+})();
+</script>
 <!-- The other pages are tiny static files — prefetch them in the background
      so clicking a nav link doesn't cost a network round trip for the HTML. -->
 <link rel="prefetch" href="submit.html">
@@ -581,7 +601,7 @@
    CONFIG — paste your Apps Script Web App URL between the quotes.
    Leave blank to preview the page with demo data.
    ================================================================ */
-const API_URL = "https://script.google.com/macros/s/AKfycbzMNOH-x8tYv0sO44-VDzFva27GS8kKMUMlnGMKod6abHXMIIh9tI0bjov9qvC7Gg/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbyATdHkIII-I8t3qzmvU7rsKF-uMfwrj0O0r-Oo4AOU_vxTLoKaePLkk7Y9wbnqUg/exec";
 
 const HOURS_GOAL_FALLBACK = 7;
 
@@ -685,6 +705,52 @@ function prefetchLogin(num){
 function storeGet(k){ try { return localStorage.getItem(k); } catch(e){ return null; } }
 function storeSet(k,v){ try { localStorage.setItem(k,v); } catch(e){} }
 function storeRemove(k){ try { localStorage.removeItem(k); } catch(e){} }
+
+/* ---------------- theme ----------------
+   Officer-configurable brand colors (Officer HQ → Settings → Theme).
+   Everything else — lighter/darker shades used across the UI — is derived
+   from just these two picks, so a theme is two colors, not a dozen. */
+const THEME_DEFAULT_PRIMARY = "#102040";
+const THEME_DEFAULT_ACCENT = "#e0c07a";
+const THEME_CACHE_KEY = "kc_theme_vars_v1";
+
+function hexToRgb_(hex){
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || "").trim());
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+function rgbToHex_(r, g, b){
+  const c = v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0");
+  return "#" + c(r) + c(g) + c(b);
+}
+function mix_(hex, towardHex, amount){
+  const a = hexToRgb_(hex), b = hexToRgb_(towardHex);
+  if (!a || !b) return hex;
+  return rgbToHex_(a.r + (b.r - a.r) * amount, a.g + (b.g - a.g) * amount, a.b + (b.b - a.b) * amount);
+}
+function computeThemeVars(primaryHex, accentHex){
+  const primary = hexToRgb_(primaryHex) ? primaryHex : THEME_DEFAULT_PRIMARY;
+  const accent = hexToRgb_(accentHex) ? accentHex : THEME_DEFAULT_ACCENT;
+  return {
+    navy: primary,
+    navy2: mix_(primary, "#ffffff", 0.22),
+    gold: accent,
+    goldBright: mix_(accent, "#ffffff", 0.18),
+    goldDeep: mix_(accent, "#000000", 0.35),
+    goldSoft: mix_(accent, "#ffffff", 0.88)
+  };
+}
+function applyThemeVars(v){
+  const s = document.documentElement.style;
+  s.setProperty("--navy", v.navy);
+  s.setProperty("--navy-2", v.navy2);
+  s.setProperty("--blue", v.navy2);
+  s.setProperty("--gold", v.gold);
+  s.setProperty("--gold-bright", v.goldBright);
+  s.setProperty("--gold-deep", v.goldDeep);
+  s.setProperty("--gold-soft", v.goldSoft);
+}
 
 /* ---------------- login / progress ---------------- */
 async function login(){
@@ -894,14 +960,18 @@ async function loadOpportunities(){
       cachedOpps = parsed.opps || [];
       renderOpportunities(cachedOpps);
       if (parsed.annualGoal) renderAnnualGoal(parsed.annualGoal, parsed.annualApproved);
+      maybeShowRegCard(parsed.regWindowStart, parsed.regWindowEnd, parsed.registrationOpen);
     }
   } catch(e){ cachedOpps = null; }
 
-  let opps, annualGoal, annualApproved;
+  let opps, annualGoal, annualApproved, regWindowStart, regWindowEnd, registrationOpen, themePrimary, themeAccent;
   try {
     const data = await apiCall({ action:"opportunities" });
     opps = data.success ? data.opportunities : null;
     annualGoal = data.annualGoal; annualApproved = data.annualApproved;
+    regWindowStart = data.regWindowStart; regWindowEnd = data.regWindowEnd;
+    registrationOpen = data.registrationOpen;
+    themePrimary = data.themePrimary; themeAccent = data.themeAccent;
   } catch(e){
     if (e.message === "DEMO"){
       opps = DEMO.opportunities; annualGoal = DEMO.annualGoal; annualApproved = DEMO.annualApproved;
@@ -917,7 +987,15 @@ async function loadOpportunities(){
   }
   renderOpportunities(opps);
   if (annualGoal) renderAnnualGoal(annualGoal, annualApproved);
-  try { storeSet(OPPS_CACHE_KEY, JSON.stringify({ opps, annualGoal, annualApproved })); } catch(e){}
+  maybeShowRegCard(regWindowStart, regWindowEnd, registrationOpen);
+  if (themePrimary || themeAccent){
+    const themeVars = computeThemeVars(themePrimary, themeAccent);
+    applyThemeVars(themeVars);
+    try { storeSet(THEME_CACHE_KEY, JSON.stringify(themeVars)); } catch(e){}
+  }
+  try {
+    storeSet(OPPS_CACHE_KEY, JSON.stringify({ opps, annualGoal, annualApproved, regWindowStart, regWindowEnd, registrationOpen }));
+  } catch(e){}
 }
 
 /* ---------------- add to calendar ---------------- */
@@ -991,25 +1069,31 @@ function icsStamp(d){
 }
 
 /* ---------------- new member registration ---------------- */
-// Shows Aug 1 – Oct 14 only (start-of-year signup window), and is a pure
-// client-side date check — no round trip to the sheet, so it appears
-// instantly instead of waiting on the "opportunities" fetch. The sheet's
-// "Registration Open" setting is still enforced server-side as a manual
-// override (see isRegistrationOpen_ in Code.gs) — an officer can force it
-// closed early and the actual submit will be blocked even if this window
-// hasn't ended yet.
-function isRegistrationWindow(){
+// Instant first paint uses the historical Aug 1 – Oct 14 default (pure
+// client-side date check, no network wait) so the card never flickers in
+// late. Once opportunities data loads — fresh or from cache — the real
+// officer-configured window and open/closed status take over via a second
+// call to maybeShowRegCard(). The sheet's "Registration Open" setting is
+// still enforced server-side as the hard override either way (see
+// isRegistrationOpen_ in Code.gs).
+const REG_WINDOW_DEFAULT_START = "08-01";
+const REG_WINDOW_DEFAULT_END = "10-14";
+
+function isRegistrationWindow(startMD, endMD){
   const now = new Date();
   const y = now.getFullYear();
-  const start = new Date(y, 7, 1);              // Aug 1
-  const end = new Date(y, 9, 14, 23, 59, 59);    // Oct 14, end of day
+  const [sm, sd] = (startMD || REG_WINDOW_DEFAULT_START).split("-").map(Number);
+  const [em, ed] = (endMD || REG_WINDOW_DEFAULT_END).split("-").map(Number);
+  const start = new Date(y, sm - 1, sd);
+  const end = new Date(y, em - 1, ed, 23, 59, 59);
   return now >= start && now <= end;
 }
 
-function maybeShowRegCard(){
+function maybeShowRegCard(startMD, endMD, registrationOpen){
   const card = document.getElementById("regCard");
   const done = storeGet("kc_registered") === "1";
-  card.classList.toggle("show", isRegistrationWindow() && !done);
+  const open = registrationOpen !== false; // unknown yet (first paint) defaults to showing
+  card.classList.toggle("show", isRegistrationWindow(startMD, endMD) && !done && open);
 }
 
 async function registerStudent(){
