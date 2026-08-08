@@ -6,6 +6,24 @@
 <title>Key Club — Submit Hours</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Applies the last-known theme colors instantly, before first paint —
+     same cache index.html writes to, so this page inherits it too instead
+     of needing its own fetch just for colors. -->
+<script>
+(function(){
+  try {
+    var v = JSON.parse(localStorage.getItem("kc_theme_vars_v1") || "null");
+    if (!v) return;
+    var s = document.documentElement.style;
+    if (v.navy) s.setProperty("--navy", v.navy);
+    if (v.navy2){ s.setProperty("--navy-2", v.navy2); s.setProperty("--blue", v.navy2); }
+    if (v.gold) s.setProperty("--gold", v.gold);
+    if (v.goldBright) s.setProperty("--gold-bright", v.goldBright);
+    if (v.goldDeep) s.setProperty("--gold-deep", v.goldDeep);
+    if (v.goldSoft) s.setProperty("--gold-soft", v.goldSoft);
+  } catch(e){}
+})();
+</script>
 <link rel="prefetch" href="index.html">
 <link rel="prefetch" href="officer.html">
 <link href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@500;600;700&family=Public+Sans:wght@400;500;600;700&family=Spline+Sans+Mono:wght@500;600&display=swap" rel="stylesheet">
@@ -304,7 +322,7 @@
    CONFIG — same Apps Script Web App URL as the other Key Club pages.
    Leave blank to preview with demo (no-op) submission behavior.
    ================================================================ */
-const API_URL = "https://script.google.com/macros/s/AKfycbzMNOH-x8tYv0sO44-VDzFva27GS8kKMUMlnGMKod6abHXMIIh9tI0bjov9qvC7Gg/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbyATdHkIII-I8t3qzmvU7rsKF-uMfwrj0O0r-Oo4AOU_vxTLoKaePLkk7Y9wbnqUg/exec";
 
 /* ---------------- button loading state ----------------
    Every async button gets a spinner + label, not just disabled text. */
